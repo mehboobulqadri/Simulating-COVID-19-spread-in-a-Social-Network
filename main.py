@@ -15,12 +15,14 @@ from  data.persistence import PersistenceManager
 from  data.export import DataExporter
 from  entities.person import State
 import random
+import math
 
 class BioSpatialApp:
     def __init__(self):
         pygame.init()
-        self.width = 1280
-        self.height = 720
+        # Increase main app window size
+        self.width = 1600
+        self.height = 900
         
         # Initialize Window (Standard Pygame)
         self.screen = pygame.display.set_mode((self.width, self.height), pygame.DOUBLEBUF)
@@ -49,8 +51,13 @@ class BioSpatialApp:
         self.visual_effects = VisualEffects()
         self.interaction = Interaction(self.camera)
         
+        # Fonts
+        self.font_main = pygame.font.SysFont("Arial", 20)
+
         # New UI Manager
         self.ui_manager = UIManagerWrapper(self.width, self.height, self.simulation_engine)
+        # Ensure God Mode panel is visible by default
+        self.ui_manager.toggle_god_mode()
         
         self.minimap = Minimap(self.width, self.height)
         if self.world_bounds:
@@ -130,6 +137,9 @@ class BioSpatialApp:
                     if self.world_bounds:
                         min_x, min_y, max_x, max_y = self.world_bounds
                         self.camera.frame_bounds(min_x, min_y, max_x, max_y)
+                elif event.key == pygame.K_g:
+                    # Toggle God Mode window via keyboard
+                    self.ui_manager.toggle_god_mode()
             
             # Pass event to UI Manager
             self.ui_manager.handle_event(event)
@@ -155,8 +165,11 @@ class BioSpatialApp:
         self.visual_effects.update()
         
         if not self.ui_manager.paused:
-            # Run multiple updates based on speed
-            steps = int(self.ui_manager.speed)
+            # Run multiple updates based on speed with an upper cap to reduce lag
+            speed_factor = self.ui_manager.speed
+            # Keep logic updates modest to avoid heavy CPU when speed is high
+            steps = max(1, int(math.ceil(speed_factor)))
+            steps = min(steps, 4)
             for _ in range(steps):
                 self.time_engine.update()
                 
@@ -166,8 +179,8 @@ class BioSpatialApp:
                 # city.update() calls person.update(). NumpyEngine replaces this.
                 # So we skip city.update().
                 
-                # Run simulation logic (infections + movement)
-                self.simulation_engine.update(self.time_engine)
+                # Run simulation logic (infections + movement) with dt for smooth motion
+                self.simulation_engine.update(self.time_engine, dt)
                 
                 # Update stats every 10 ticks (optimization)
                 if self.time_engine.ticks % 10 == 0:
@@ -175,17 +188,20 @@ class BioSpatialApp:
 
     def render(self):
         # 1. Render World
-        self.renderer.render()
+        # Keep full detail until very high speeds to prevent color loss
+        if self.ui_manager.speed > 14.0:
+            self.renderer.render(min_detail=True)
+        else:
+            self.renderer.render()
 
-        # Minimap overlay
+        # Minimap overlay: Always render (user requested it never disappears)
         self.minimap.render(self.screen, self.cities, self.camera)
         
         # 2. Render UI (Pygame Surface)
         self.ui_surface.fill((0, 0, 0, 0)) # Clear
         
         # Render UI overlay (Time)
-        font = pygame.font.SysFont("Arial", 20)
-        time_surf = font.render(self.time_engine.get_time_string(), True, (255, 255, 255))
+        time_surf = self.font_main.render(self.time_engine.get_time_string(), True, (255, 255, 255))
         self.ui_surface.blit(time_surf, (10, 10))
         
         # 3. Composite UI onto Screen

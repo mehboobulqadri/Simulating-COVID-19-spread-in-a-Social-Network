@@ -189,5 +189,33 @@ class WorldGenerator:
         # Generate social networks
         WorldGenerator.generate_social_networks(cities)
         
+        # Add inter-city roads
+        WorldGenerator.generate_inter_city_roads(cities)
+        
         return cities
+    
+    @staticmethod
+    def generate_inter_city_roads(cities):
+        """Generate roads connecting city centers"""
+        if len(cities) < 2:
+            return
+            
+        # Connect each city to its nearest neighbors
+        for i, city_a in enumerate(cities):
+            distances = []
+            for j, city_b in enumerate(cities):
+                if i != j:
+                    dist = math.hypot(city_a.location[0] - city_b.location[0],
+                                     city_a.location[1] - city_b.location[1])
+                    distances.append((dist, j, city_b))
+            
+            # Connect to 2 nearest cities
+            distances.sort()
+            for _, j, city_b in distances[:2]:
+                # Create highway between cities
+                road = Road(city_a.location, city_b.location, width=20)
+                # Store on both cities to avoid duplicates
+                if not hasattr(city_a, 'highways'):
+                    city_a.highways = []
+                city_a.highways.append(road)
 

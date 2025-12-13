@@ -1,6 +1,7 @@
 import numpy as np
 import random
 from entities.person import State
+from core.pathfinding import SimplePathfinder
 
 class NumpySimulationEngine:
     def __init__(self, cities):
@@ -30,6 +31,7 @@ class NumpySimulationEngine:
         # Initialize Data
         idx = 0
         self.person_map = [] # Map index back to object (for compatibility/debugging)
+        self.person_to_index = {} # Fast lookup from person object to array index
         
         for city in cities:
             for district in city.districts:
@@ -44,20 +46,33 @@ class NumpySimulationEngine:
                     self.state[idx] = p.state.value
                     self.speed[idx] = p.speed
                     self.person_map.append(p)
+                    self.person_to_index[p] = idx
                     idx += 1
                     
         # Constants
         self.infection_radius = 10.0
         self.infection_prob = 0.05
+        self.recovery_rate = 0.02  # Death rate from illness
+        # Factor to scale spatial spillover probability relative to base infection_prob
+        self.spatial_spillover_factor = 0.3
         self.infection_radius_sq = self.infection_radius ** 2
         
-        # God Mode / Settings
+        # Settings
         self.vaccination_threshold = 0.3
         self.vaccination_rate = 0.005
         self.hospital_cure_rate = 0.01
         self.vaccination_active = False
+        
+        # Pathfinding
+        self.use_road_snapping = True  # Toggle for road-following behavior
+        # Global speed multiplier (controlled via UI)
+        self.speed_multiplier = 1.0
 
-    def update(self, time_engine):
+    def set_speed_multiplier(self, multiplier: float):
+        # Clamp to reasonable range to avoid instability and maintain smoothness
+        self.speed_multiplier = float(max(0.5, min(multiplier, 6.0)))
+
+    def update(self, time_engine, dt):
         # 1. Update Logic (State Transitions)
         # Vectorized state timers
         
@@ -76,9 +91,9 @@ class NumpySimulationEngine:
         
         count_finished = np.count_nonzero(finished_infection)
         if count_finished > 0:
-            # 2% death rate
+            # Use configurable recovery_rate for death probability
             outcomes = np.random.random(count_finished)
-            deaths = outcomes < 0.02
+            deaths = outcomes < self.recovery_rate
             recoveries = ~deaths
             
             # Map back to full array indices
@@ -119,7 +134,8 @@ class NumpySimulationEngine:
             # If dist < speed, snap to target
             # If dist >= speed, move by speed
             
-            speeds = self.speed[has_target]
+            # Scale by dt*60 to approximate previous per-frame speeds at 60 FPS
+            speeds = self.speed[has_target] * self.speed_multiplier * (dt * 60.0)
             
             # Indices within the 'has_target' subset
             reached = dist <= speeds
@@ -140,7 +156,25 @@ class NumpySimulationEngine:
             moving_indices = indices[not_reached]
             # Normalize diff
             norm_diff = diff[not_reached] / dist[not_reached, np.newaxis]
-            self.pos[moving_indices] += norm_diff * speeds[not_reached, np.newaxis]
+            
+            # Apply road snapping for realistic movement
+            if self.use_road_snapping:
+                for idx in moving_indices:
+                    # Calculate next position
+                    next_pos = self.pos[idx] + norm_diff[np.where(moving_indices == idx)[0][0]] * (self.speed[idx] * self.speed_multiplier * (dt * 60.0))
+                    
+                    # Snap to road
+                    snapped_x, snapped_y, is_on_road = SimplePathfinder.snap_to_road(
+                        next_pos, self.cities, road_snap_distance=25
+                    )
+                    
+                    if is_on_road:
+                        self.pos[idx] = [snapped_x, snapped_y]
+                    else:
+                        self.pos[idx] = next_pos
+            else:
+                # Original direct movement
+                self.pos[moving_indices] += norm_diff * speeds[not_reached, np.newaxis]
 
         # 3. Infection Logic (Spatial Hash)
         # Only run if there are infectious people
@@ -166,10 +200,9 @@ class NumpySimulationEngine:
                 
             # Infect social contacts
             for neighbor in infected_person.social_neighbors:
-                # Find neighbor's index in person_map
-                try:
-                    neighbor_idx = self.person_map.index(neighbor)
-                except ValueError:
+                # Fast index lookup
+                neighbor_idx = self.person_to_index.get(neighbor)
+                if neighbor_idx is None:
                     continue
                     
                 # Only infect if susceptible
@@ -179,10 +212,10 @@ class NumpySimulationEngine:
                         self.state[neighbor_idx] = State.EXPOSED.value
                         self.timer[neighbor_idx] = np.random.randint(100, 300)
         
-        # Secondary transmission: Spatial spillover (incidental contacts)
-        # Keep a reduced version for realism (e.g., touching same surface)
-        spatial_spillover_prob = self.infection_prob * 0.3  # 30% of base rate
-        spatial_radius_sq = self.infection_radius_sq  # Use full spatial radius again
+        # Secondary transmission: Spatial spillover (incidental contacts and cross-city spread)
+        # Increased for better cross-city infection spread
+        spatial_spillover_prob = self.infection_prob * float(getattr(self, 'spatial_spillover_factor', 0.3))
+        spatial_radius_sq = self.infection_radius_sq * 2.0  # Slightly expanded radius, less heavy than 4x
         
         for inf_idx in infectious_indices:
             inf_pos = self.pos[inf_idx]

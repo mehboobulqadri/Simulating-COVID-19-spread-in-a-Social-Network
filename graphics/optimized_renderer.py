@@ -79,24 +79,33 @@ class OptimizedRenderer:
     def set_world_data(self, cities):
         self.cities = cities
 
-    def render(self):
+    def render(self, min_detail=False):
         # Clear screen
         self.screen.fill((20, 20, 25)) # Darker background
         
         zoom = self.camera.zoom
         
-        # Draw Grid
-        self._render_grid()
+        # Draw Grid (skip when minimizing detail)
+        if not min_detail:
+            self._render_grid()
         
         # Draw Cities
         for city in self.cities:
-            # Draw Roads
+            # Draw City Grid Roads
             if hasattr(city, 'roads'):
                 for road in city.roads:
                     start = self.camera.apply(*road.start)
                     end = self.camera.apply(*road.end)
                     width = max(1, int(road.width * zoom))
                     pygame.draw.line(self.screen, (40, 40, 45), start, end, width)
+            
+            # Draw Inter-City Highways
+            if hasattr(city, 'highways'):
+                for road in city.highways:
+                    start = self.camera.apply(*road.start)
+                    end = self.camera.apply(*road.end)
+                    width = max(2, int(road.width * zoom))
+                    pygame.draw.line(self.screen, (80, 80, 50), start, end, width)
 
             # Draw Districts
             for district in city.districts:
@@ -117,7 +126,7 @@ class OptimizedRenderer:
                     pygame.draw.rect(self.screen, (40, 40, 50), screen_rect, 1)
                 
                 # Draw Buildings
-                if zoom > 0.5:
+                if zoom > 0.5 and not min_detail:
                     for b in district.buildings:
                         b_rect = self._world_to_screen_rect(b.bounds)
                         color = b.color
@@ -144,18 +153,19 @@ class OptimizedRenderer:
                     
                     self.screen.blits(blits)
 
-        # Render Visual Effects
-        if self.visual_effects:
+        # Render Visual Effects (skip at minimal detail)
+        if self.visual_effects and not min_detail:
             self.visual_effects.render(self.screen, self.camera)
         
-        # Render Legend
-        self._render_legend()
+        # Render Legend (skip at minimal detail)
+        if not min_detail:
+            self._render_legend()
         
-        # Render HUD (Time, FPS, Agent Count, Infection Rate)
+        # Render HUD (always render; shows FPS)
         self._render_hud()
             
-        # Render Hover Info
-        if self.interaction:
+        # Render Hover Info (skip at minimal detail)
+        if self.interaction and not min_detail:
             self._render_hover_info()
 
     def _render_legend(self):
