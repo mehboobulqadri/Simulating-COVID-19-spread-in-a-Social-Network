@@ -155,51 +155,82 @@ class NumpySimulationEngine:
             p.state = State(self.state[i])
 
     def _process_infections(self, infectious_indices):
-        """Graph-based infection with optional spatial spillover"""
-        # Primary transmission: Through social network
-        for inf_idx in infectious_indices:
-            infected_person = self.person_map[inf_idx]
-            
-            # Check if person has social neighbors
-            if not hasattr(infected_person, 'social_neighbors'):
-                continue
+        # Simple Grid Spatial Hash
+        cell_size = 20.0
+        
+        # Compute cell coordinates
+        cell_coords = (self.pos // cell_size).astype(np.int32)
+        
+        # Hash: x * 10000 + y (assuming world isn't too big)
+        cell_hashes = cell_coords[:, 0] * 10000 + cell_coords[:, 1]
+        
+        # Sort by hash
+        sorted_order = np.argsort(cell_hashes)
+        sorted_hashes = cell_hashes[sorted_order]
+        sorted_pos = self.pos[sorted_order]
+        sorted_state = self.state[sorted_order]
+        
+        # Find boundaries of cells
+        # np.unique returns unique elements and their indices
+        unique_hashes, unique_indices = np.unique(sorted_hashes, return_index=True)
+        
+        # Iterate over infectious people
+        # Optimization: Only check cells containing infectious people
+        
+        # Get hashes of infectious people
+        inf_hashes = cell_hashes[infectious_indices]
+        unique_inf_hashes = np.unique(inf_hashes)
+        
+        for h in unique_inf_hashes:
+            # Find start/end of this cell in sorted array
+            # This search can be optimized
+            idx = np.searchsorted(unique_hashes, h)
+            if idx < len(unique_hashes) and unique_hashes[idx] == h:
+                start = unique_indices[idx]
+                end = unique_indices[idx+1] if idx + 1 < len(unique_indices) else len(sorted_hashes)
                 
-            # Infect social contacts
-            for neighbor in infected_person.social_neighbors:
-                # Find neighbor's index in person_map
-                try:
-                    neighbor_idx = self.person_map.index(neighbor)
-                except ValueError:
+                # Get indices of people in this cell
+                cell_indices = sorted_order[start:end]
+                
+                # Split into carriers and susceptible
+                local_states = self.state[cell_indices]
+                carriers = cell_indices[local_states == State.INFECTIOUS.value]
+                susceptible = cell_indices[local_states == State.SUSCEPTIBLE.value]
+                
+                if len(carriers) == 0 or len(susceptible) == 0:
                     continue
                     
-                # Only infect if susceptible
-                if self.state[neighbor_idx] == State.SUSCEPTIBLE.value:
-                    # Social contact infection probability (higher than spatial)
-                    if np.random.random() < self.infection_prob * 2.0:  # 2x more likely via social contact
-                        self.state[neighbor_idx] = State.EXPOSED.value
-                        self.timer[neighbor_idx] = np.random.randint(100, 300)
-        
-        # Secondary transmission: Spatial spillover (incidental contacts)
-        # Keep a reduced version for realism (e.g., touching same surface)
-        spatial_spillover_prob = self.infection_prob * 0.3  # 30% of base rate
-        spatial_radius_sq = self.infection_radius_sq  # Use full spatial radius again
-        
-        for inf_idx in infectious_indices:
-            inf_pos = self.pos[inf_idx]
-            
-            # Check nearby people (simple brute force for now, can optimize later)
-            diff = self.pos - inf_pos
-            d2 = np.sum(diff**2, axis=1)
-            
-            # Find close susceptible people
-            close_mask = (d2 < spatial_radius_sq) & (self.state == State.SUSCEPTIBLE.value)
-            close_indices = np.where(close_mask)[0]
-            
-            for close_idx in close_indices:
-                if close_idx != inf_idx:  # Don't infect self
-                    if np.random.random() < spatial_spillover_prob:
-                        self.state[close_idx] = State.EXPOSED.value
-                        self.timer[close_idx] = np.random.randint(100, 300)
+                # Brute force check within cell
+                # (Can also check neighbor cells, but let's stick to same cell for speed/simplicity)
+                
+                c_pos = self.pos[carriers]
+                s_pos = self.pos[susceptible]
+                
+                # Distance matrix: (NumCarriers, NumSusceptible)
+                # This can be memory heavy if cell is crowded
+                # Loop over carriers to save memory
+                
+                for i in range(len(carriers)):
+                    diff = s_pos - c_pos[i]
+                    d2 = np.sum(diff**2, axis=1)
+                    
+                    # Find contacts
+                    contacts = d2 < self.infection_radius_sq
+                    
+                    if np.any(contacts):
+                        # Roll dice
+                        probs = np.random.random(np.count_nonzero(contacts))
+                        infections = probs < self.infection_prob
+                        
+                        # Apply infections
+                        contact_indices = np.where(contacts)[0]
+                        infected_local_indices = contact_indices[infections]
+                        
+                        # Map back to global indices
+                        global_infected = susceptible[infected_local_indices]
+                        
+                        self.state[global_infected] = State.EXPOSED.value
+                        self.timer[global_infected] = np.random.randint(100, 300, size=len(global_infected))
 
     def infect_random_person(self):
         # Find a susceptible person
