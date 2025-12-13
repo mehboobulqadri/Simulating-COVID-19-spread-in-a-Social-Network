@@ -1,4 +1,5 @@
 import pygame
+import numpy as np
 
 class Camera:
     def __init__(self, width, height):
@@ -14,6 +15,38 @@ class Camera:
         # Drag state
         self.is_dragging = False
         self.last_mouse_pos = (0, 0)
+
+    def get_projection_matrix(self):
+        # Orthographic Projection: 0..width, height..0 (Top-left origin)
+        L, R = 0, self.width
+        B, T = self.height, 0 
+        
+        return np.array([
+            [2/(R-L), 0, 0, 0],
+            [0, 2/(T-B), 0, 0],
+            [0, 0, -1, 0],
+            [-(R+L)/(R-L), -(T+B)/(T-B), 0, 1]
+        ], dtype='f4')
+
+    def get_view_matrix(self):
+        # Transform: Translate(-Cam) -> Scale(Zoom) -> Translate(ScreenCenter)
+        
+        # T_world
+        t_world = np.identity(4, dtype='f4')
+        t_world[3, 0] = -self.x
+        t_world[3, 1] = -self.y
+        
+        # Scale
+        scale = np.identity(4, dtype='f4')
+        scale[0, 0] = self.zoom
+        scale[1, 1] = self.zoom
+        
+        # T_screen
+        t_screen = np.identity(4, dtype='f4')
+        t_screen[3, 0] = self.width / 2
+        t_screen[3, 1] = self.height / 2
+        
+        return t_world @ scale @ t_screen
 
     def handle_input(self):
         keys = pygame.key.get_pressed()
@@ -62,3 +95,17 @@ class Camera:
         screen_x = (x - self.x) * self.zoom + self.width / 2
         screen_y = (y - self.y) * self.zoom + self.height / 2
         return int(screen_x), int(screen_y)
+
+    def frame_bounds(self, min_x, min_y, max_x, max_y, padding=200):
+        """Center and zoom camera to fit given world bounds."""
+        w = max_x - min_x
+        h = max_y - min_y
+        if w <= 0 or h <= 0:
+            return
+        w_p = w + 2 * padding
+        h_p = h + 2 * padding
+        zoom_x = self.width / w_p
+        zoom_y = self.height / h_p
+        self.zoom = min(zoom_x, zoom_y)
+        self.x = (min_x + max_x) / 2
+        self.y = (min_y + max_y) / 2

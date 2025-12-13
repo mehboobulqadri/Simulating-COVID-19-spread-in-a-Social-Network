@@ -1,5 +1,6 @@
 import pygame
 from entities.person import State
+from entities.building import BuildingType
 from graphics.textures import TextureManager
 
 class Renderer:
@@ -10,6 +11,7 @@ class Renderer:
         self.texture_manager = TextureManager()
         self.visual_effects = None # Will be set by main
         self.interaction = None # Will be set by main
+        self.time_engine = None # Will be set by main
         
         # Colors
         self.colors = {
@@ -47,9 +49,37 @@ class Renderer:
         if self.visual_effects:
             self.visual_effects.render(self.screen, self.camera)
             
+        # Render Lighting Overlay
+        if self.time_engine:
+            self._render_lighting()
+            
         # Render Hover Info
         if self.interaction:
             self._render_hover_info()
+
+    def _render_lighting(self):
+        hour = self.time_engine.hour
+        alpha = 0
+        
+        # Night cycle: 20:00 (8 PM) to 06:00 (6 AM)
+        if hour >= 20 or hour < 6:
+            if hour >= 20:
+                # Fade in 20:00 - 22:00
+                if hour < 22:
+                    alpha = int(150 * ((hour - 20) / 2))
+                else:
+                    alpha = 150 # Max darkness
+            else:
+                # Fade out 04:00 - 06:00
+                if hour < 4:
+                    alpha = 150
+                else:
+                    alpha = int(150 * (1 - (hour - 4) / 2))
+        
+        if alpha > 0:
+            s = pygame.Surface((self.screen.get_width(), self.screen.get_height()), pygame.SRCALPHA)
+            s.fill((0, 0, 20, alpha)) # Dark blue tint
+            self.screen.blit(s, (0, 0))
 
     def _render_grid(self):
         grid_size = 500
@@ -98,43 +128,91 @@ class Renderer:
         rect = district.bounds
         screen_rect = pygame.Rect(*self.camera.apply(rect.x, rect.y), rect.width * zoom, rect.height * zoom)
         
-        # Fill with semi-transparent color
-        # Create a surface for transparency
-        s = pygame.Surface((screen_rect.width, screen_rect.height), pygame.SRCALPHA)
-        
-        # Color based on infection level? Or just generic district color
-        # Let's do generic for now, maybe slightly varying
-        fill_color = (60, 60, 80, 100) # Blue-ish grey, transparent
-        
+        # Render Ground Texture (Tiled)
+        tex = self.texture_manager.get_texture('ground_grass')
+        if tex and zoom > 0.5:
+            # Create a surface for the district
+            d_surf = pygame.Surface((screen_rect.width, screen_rect.height))
+            
+            # Scale texture based on zoom (optional, but keeps detail consistent)
+            # Actually, let's keep texture scale constant relative to world, so it zooms with camera
+            tex_size = int(100 * zoom)
+            if tex_size > 0:
+                scaled_tex = pygame.transform.scale(tex, (tex_size, tex_size))
+                
+                for y in range(0, screen_rect.height, tex_size):
+                    for x in range(0, screen_rect.width, tex_size):
+                        d_surf.blit(scaled_tex, (x, y))
+                
+                self.screen.blit(d_surf, (screen_rect.x, screen_rect.y))
+        else:
+            # Fallback fill
+            fill_color = (60, 60, 80, 100)
+            s = pygame.Surface((screen_rect.width, screen_rect.height), pygame.SRCALPHA)
+            s.fill(fill_color)
+            self.screen.blit(s, (screen_rect.x, screen_rect.y))
+
         # Highlight if hovered
         border_color = (80, 80, 100)
         width = 1
         if self.interaction and self.interaction.hovered_entity == district:
             border_color = (200, 200, 200)
             width = 2
-            fill_color = (80, 80, 100, 150)
             
-        s.fill(fill_color)
-        self.screen.blit(s, (screen_rect.x, screen_rect.y))
         pygame.draw.rect(self.screen, border_color, screen_rect, width)
         
         # Draw District Name if zoomed enough
         if zoom > 0.8:
-            text = self.font.render(district.name, True, (150, 150, 150))
+            text = self.font.render(district.name, True, (200, 200, 200))
+            # Add shadow
+            shadow = self.font.render(district.name, True, (0, 0, 0))
+            self.screen.blit(shadow, (screen_rect.x + 6, screen_rect.y + 6))
             self.screen.blit(text, (screen_rect.x + 5, screen_rect.y + 5))
         
         if zoom > 1.5:
+            # Render Buildings
+            for building in district.buildings:
+                self._render_building(building, zoom)
+
             # Render People
             for person in district.people:
                 px, py = self.camera.apply(person.x, person.y)
                 
-                color = self.colors.get(person.state, (255, 255, 255))
-                
-                if person.state == State.INFECTIOUS:
-                    # Draw glow
-                    pygame.draw.circle(self.screen, (255, 50, 50, 50), (px, py), 6 * zoom)
+                # Use Glow Texture
+                glow = self.texture_manager.get_texture('person_glow')
+                if glow:
+                    # Tint the glow based on state
+                    color = self.colors.get(person.state, (255, 255, 255))
+                    tinted_glow = glow.copy()
+                    tinted_glow.fill(color, special_flags=pygame.BLEND_RGBA_MULT)
                     
-                pygame.draw.circle(self.screen, color, (px, py), 2 * zoom)
+                    # Scale
+                    size = int(20 * zoom)
+                    if size > 0:
+                        scaled_glow = pygame.transform.scale(tinted_glow, (size, size))
+                        self.screen.blit(scaled_glow, (px - size//2, py - size//2))
+                else:
+                    color = self.colors.get(person.state, (255, 255, 255))
+                    pygame.draw.circle(self.screen, color, (px, py), 2 * zoom)
+
+    def _render_building(self, building, zoom):
+        rect = building.bounds
+        screen_rect = pygame.Rect(*self.camera.apply(rect.x, rect.y), rect.width * zoom, rect.height * zoom)
+        
+        tex_name = 'building_residential'
+        if building.type == BuildingType.WORKPLACE:
+            tex_name = 'building_workplace'
+        elif building.type == BuildingType.HOSPITAL:
+            tex_name = 'building_hospital'
+            
+        tex = self.texture_manager.get_texture(tex_name)
+        if tex:
+            scaled_tex = pygame.transform.scale(tex, (screen_rect.width, screen_rect.height))
+            self.screen.blit(scaled_tex, screen_rect)
+        else:
+            color = building.color
+            pygame.draw.rect(self.screen, color, screen_rect)
+            pygame.draw.rect(self.screen, (50, 50, 50), screen_rect, 1)
 
     def _render_hover_info(self):
         info = self.interaction.get_hover_info()

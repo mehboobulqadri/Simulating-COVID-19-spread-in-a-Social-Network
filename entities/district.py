@@ -9,6 +9,10 @@ class District(GraphNode):
         self.bounds = bounds # pygame.Rect
         self.quadtree = QuadTree(bounds, capacity)
         self.people = []
+        self.buildings = []
+        
+    def add_building(self, building):
+        self.buildings.append(building)
         
     def add_person(self, person):
         self.people.append(person)

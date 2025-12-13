@@ -1,15 +1,14 @@
 import pygame
 from entities.person import State
+from ui.theme import UITheme
 
 class Dashboard:
     def __init__(self, screen_width, screen_height):
         self.width = 300
-        self.height = 150
+        self.height = 180 # Increased height
         self.x = 10
         self.y = screen_height - self.height - 10
         self.rect = pygame.Rect(self.x, self.y, self.width, self.height)
-        
-        self.font = pygame.font.SysFont("Arial", 12)
         
         # Colors for graph lines
         self.colors = {
@@ -17,14 +16,13 @@ class Dashboard:
             State.EXPOSED: (255, 255, 100),
             State.INFECTIOUS: (255, 50, 50),
             State.RECOVERED: (50, 200, 50),
-            State.DECEASED: (100, 100, 100),
+            State.DECEASED: (150, 150, 150),
             State.VACCINATED: (200, 100, 255)
         }
 
     def render(self, screen, stats_manager):
         # Background
-        pygame.draw.rect(screen, (30, 30, 30, 200), self.rect)
-        pygame.draw.rect(screen, (100, 100, 100), self.rect, 1)
+        UITheme.draw_panel_bg(screen, self.rect)
         
         if not stats_manager.time_points:
             return
@@ -39,7 +37,7 @@ class Dashboard:
         if max_val == 0:
             max_val = 1
             
-        graph_h = self.height - 20
+        graph_h = self.height - 40
         graph_w = self.width - 20
         x_start = self.x + 10
         y_bottom = self.y + self.height - 10
@@ -64,18 +62,23 @@ class Dashboard:
                 
         # Legend / Current Stats
         latest = stats_manager.get_latest_counts()
-        y_off = self.y - 20
-        x_off = self.x
         
-        # Draw mini legend above graph
+        # Draw mini legend at top of panel
         legend_items = [
             (State.INFECTIOUS, "Inf"),
             (State.RECOVERED, "Rec"),
-            (State.DECEASED, "Dec")
+            (State.DECEASED, "Dec"),
+            (State.VACCINATED, "Vac")
         ]
+        
+        font = UITheme.get_font(12, bold=True)
+        
+        x_off = self.x + 10
+        y_off = self.y + 5
         
         for i, (state, label) in enumerate(legend_items):
             color = self.colors[state]
             text = f"{label}: {latest[state]}"
-            surf = self.font.render(text, True, color)
-            screen.blit(surf, (x_off + i * 80, y_off))
+            surf = font.render(text, True, color)
+            screen.blit(surf, (x_off + i * 70, y_off))
+

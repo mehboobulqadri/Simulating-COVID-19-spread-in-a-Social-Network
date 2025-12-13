@@ -1,0 +1,39 @@
+# Add to imports at top:
+import networkx as nx
+
+# Add this method inside WorldGenerator class, before generate_world:
+    @staticmethod
+    def generate_social_networks(cities):
+        """Generate Watts-Strogatz small-world networks for each city"""
+        print("Generating social networks...")
+        
+        for city in cities:
+            # Get all people in this city
+            city_people = []
+            for district in city.districts:
+                city_people.extend(district.people)
+            
+            n = len(city_people)
+            if n < 4:
+                # Too few people for meaningful network
+                continue
+                
+            # Watts-Strogatz parameters
+            k = min(8, n - 1)  # Average degree (neighbors per node)
+            p = 0.1  # Rewiring probability (creates shortcuts)
+            
+            # Generate small-world graph
+            G = nx.watts_strogatz_graph(n, k, p)
+            
+            # Store neighbor lists on each person
+            for idx, person in enumerate(city_people):
+                neighbor_indices = list(G.neighbors(idx))
+                person.social_neighbors = [city_people[i] for i in neighbor_indices]
+                person.neighbor_count = len(neighbor_indices)
+            
+            print(f"  {city.name}: {n} people, avg {k} neighbors")
+        
+        print("Social networks generated!")
+
+# Add this call in generate_world, right before "return cities":
+        WorldGenerator.generate_social_networks(cities)

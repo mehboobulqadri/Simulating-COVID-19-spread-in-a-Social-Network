@@ -7,6 +7,7 @@ class City(GraphNode):
         self.name = name
         self.location = location # (x, y) center
         self.districts = []
+        self.hospitals = []
         
     def add_district(self, district):
         self.districts.append(district)
