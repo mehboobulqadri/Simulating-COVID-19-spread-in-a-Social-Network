@@ -190,12 +190,18 @@ class OptimizedRenderer:
             self.screen.blit(text, (legend_x + padding + 18, y + 3))
 
     def _render_hud(self):
-        """Draw HUD with FPS, agents, commuters, and infection counts"""
+        """Draw HUD with FPS and agent count only"""
+        # Calculate total agents
+        total_agents = 0
+        for city in self.cities:
+            for district in city.districts:
+                total_agents += len(district.people)
+        
         # Top-right HUD panel (compact)
         hud_x = self.screen.get_width() - 200
         hud_y = 15
         hud_w = 185
-        hud_h = 105
+        hud_h = 70
         
         # Background
         hud_bg = pygame.Surface((hud_w, hud_h), pygame.SRCALPHA)
@@ -210,29 +216,10 @@ class OptimizedRenderer:
         fps_color = (100, 200, 100) if self.fps > 45 else (255, 200, 100) if self.fps > 30 else (255, 100, 100)
         fps_text = self.font_small.render(f"FPS: {self.fps:.1f}", True, fps_color)
         self.screen.blit(fps_text, (hud_x + 15, hud_y + 10))
-
-        # Precomputed totals
-        agents_text = self.font_small.render(f"Agents: {self.total_agents}", True, (200, 200, 200))
-        commuters_text = self.font_small.render(f"Commuters: {self.total_commuters}", True, (180, 200, 255))
-
-        # Infection counts (computed on the fly)
-        exposed = 0
-        infectious = 0
-        for city in self.cities:
-            for district in city.districts:
-                for p in district.people:
-                    if p.state == State.EXPOSED:
-                        exposed += 1
-                    elif p.state == State.INFECTIOUS:
-                        infectious += 1
-
-        exposed_text = self.font_small.render(f"Exposed: {exposed}", True, (255, 200, 120))
-        infectious_text = self.font_small.render(f"Infectious: {infectious}", True, (255, 120, 120))
         
+        # Total Agents
+        agents_text = self.font_small.render(f"Agents: {total_agents}", True, (200, 200, 200))
         self.screen.blit(agents_text, (hud_x + 15, hud_y + 28))
-        self.screen.blit(commuters_text, (hud_x + 15, hud_y + 44))
-        self.screen.blit(exposed_text, (hud_x + 15, hud_y + 60))
-        self.screen.blit(infectious_text, (hud_x + 15, hud_y + 76))
 
     def _render_hover_info(self):
         info = self.interaction.get_hover_info()
