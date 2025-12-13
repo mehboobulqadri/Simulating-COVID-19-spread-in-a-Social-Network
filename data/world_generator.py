@@ -1,5 +1,4 @@
 import pygame
-import networkx as nx
 import random
 import math
 from entities.city import City
@@ -161,22 +160,5 @@ class WorldGenerator:
                             target_b = random.choice(local_wps)
 
                         p.work_location = (target_b.bounds.centerx, target_b.bounds.centery)
-
-        # Generate social networks per city (Watts-Strogatz small-world)
-        for city in cities:
-            # Collect people list for index mapping
-            city_people = [p for d in city.districts for p in d.people]
-            n = len(city_people)
-            if n == 0:
-                continue
-            # Average degree ~8, rewiring probability 0.1
-            k = max(4, min(12, 8))
-            p = 0.1
-            G = nx.watts_strogatz_graph(n, k, p)
-            # Assign neighbors to each person
-            for i, person in enumerate(city_people):
-                neighbor_indices = list(G.neighbors(i))
-                person.social_neighbors = [city_people[j] for j in neighbor_indices]
-                person.neighbor_count = len(neighbor_indices)
 
         return cities
