@@ -40,24 +40,26 @@ class OptimizedRenderer:
                         self.total_commuters += 1
 
     def _create_assets(self):
-        # Create circle surfaces for people
-            # Use precomputed total agents and commuters
-            agents_text = self.font_small.render(f"Agents: {self.total_agents}", True, (200, 200, 200))
-            commuters_text = self.font_small.render(f"Commuters: {self.total_commuters}", True, (180,200,255))
+        # Create circle surfaces for people and define state colors
+        states = {
+            State.SUSCEPTIBLE: (100, 200, 255),
+            State.EXPOSED: (255, 200, 100),
+            State.INFECTIOUS: (255, 80, 80),
+            State.RECOVERED: (120, 200, 120),
             State.DECEASED: (50, 50, 50),
             State.VACCINATED: (200, 100, 255)
         }
-        
+
         # Store state colors for legend rendering
         self.state_colors = states
-        
+
         self.person_surfs = {}
         for state, color in states.items():
             # Create a small circle surface
             s = pygame.Surface((8, 8), pygame.SRCALPHA)
             pygame.draw.circle(s, color, (4, 4), 3)
             self.person_surfs[state] = s
-            
+
             # Create a glow surface for infectious
             if state == State.INFECTIOUS:
                 g = pygame.Surface((16, 16), pygame.SRCALPHA)
@@ -66,8 +68,6 @@ class OptimizedRenderer:
                 # Inner core
                 pygame.draw.circle(g, (255, 200, 200), (8, 8), 3)
                 self.person_surfs['glow'] = g
-
-            self.screen.blit(commuters_text, (hud_x + 15, hud_y + 46))
     def set_world_data(self, cities):
         self.cities = cities
 
