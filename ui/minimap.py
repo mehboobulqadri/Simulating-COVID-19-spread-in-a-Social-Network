@@ -10,10 +10,20 @@ class Minimap:
         
         self.world_width = world_width
         self.world_height = world_height
-        self.scale_x = self.size / self.world_width
-        self.scale_y = self.size / self.world_height
+        self._update_scale()
         
         self.dragging = False
+
+    def set_world_bounds(self, min_x, min_y, max_x, max_y):
+        """Adjust minimap scale to current world extents."""
+        self.world_width = max(1, max_x - min_x)
+        self.world_height = max(1, max_y - min_y)
+        self.world_origin = (min_x, min_y)
+        self._update_scale()
+
+    def _update_scale(self):
+        self.scale_x = self.size / self.world_width
+        self.scale_y = self.size / self.world_height
 
     def handle_event(self, event, camera):
         if event.type == pygame.MOUSEBUTTONDOWN:
@@ -41,6 +51,10 @@ class Minimap:
         # Convert to world coordinates
         wx = mx / self.scale_x
         wy = my / self.scale_y
+        # Shift by world origin if provided
+        ox, oy = getattr(self, 'world_origin', (0, 0))
+        wx += ox
+        wy += oy
         
         # Set camera center
         camera.x = wx
@@ -51,16 +65,17 @@ class Minimap:
         UITheme.draw_panel_bg(screen, self.rect)
         
         # Draw Cities/Districts
+        ox, oy = getattr(self, 'world_origin', (0, 0))
         for city in cities:
             # City Dot
-            cx = self.x + city.location[0] * self.scale_x
-            cy = self.y + city.location[1] * self.scale_y
+            cx = self.x + (city.location[0] - ox) * self.scale_x
+            cy = self.y + (city.location[1] - oy) * self.scale_y
             pygame.draw.circle(screen, (200, 200, 200), (cx, cy), 3)
             
             for district in city.districts:
                 r = district.bounds
-                dx = self.x + r.x * self.scale_x
-                dy = self.y + r.y * self.scale_x # Use scale_x for square aspect ratio if needed, but scale_y is fine
+                dx = self.x + (r.x - ox) * self.scale_x
+                dy = self.y + (r.y - oy) * self.scale_y
                 dw = r.width * self.scale_x
                 dh = r.height * self.scale_y
                 
@@ -88,8 +103,9 @@ class Minimap:
         vw_world = screen_w / zoom
         vh_world = screen_h / zoom
         
-        vx = vx_world * self.scale_x
-        vy = vy_world * self.scale_y
+        ox, oy = getattr(self, 'world_origin', (0, 0))
+        vx = (vx_world - ox) * self.scale_x
+        vy = (vy_world - oy) * self.scale_y
         vw = vw_world * self.scale_x
         vh = vh_world * self.scale_y
         
