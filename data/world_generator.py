@@ -118,22 +118,47 @@ class WorldGenerator:
             
             cities.append(city)
             
-        # Assign Work Locations
+        # Assign Work Locations (including cross-city commuters)
+        # Build a list of workplaces per city for local assignment and cross-city selection
+        city_workplaces = []
         for city in cities:
-            workplaces = []
+            wps = []
             for d in city.districts:
                 for b in d.buildings:
                     if b.type == BuildingType.WORKPLACE or b.type == BuildingType.HOSPITAL:
-                        workplaces.append(b)
-            
-            if not workplaces:
-                # Fallback if no workplaces
-                workplaces = [b for d in city.districts for b in d.buildings]
+                        wps.append(b)
+            if not wps:
+                # Fallback if no workplaces: consider any building
+                wps = [b for d in city.districts for b in d.buildings]
+            city_workplaces.append(wps)
+
+        # Probability that a person works in another city (commuter)
+        cross_city_prob = 0.12  # ~12% commuters
+
+        for city_idx, city in enumerate(cities):
+            local_wps = city_workplaces[city_idx]
+            # Prepare a flat list of other cities' workplaces
+            other_wps = [b for idx, wps in enumerate(city_workplaces) if idx != city_idx for b in wps]
 
             for d in city.districts:
                 for p in d.people:
-                    if random.random() < 0.8: # 80% employed
-                        target_b = random.choice(workplaces)
+                    # Track home/work city ids for commuter logic and analytics
+                    p.home_city_id = city_idx
+                    p.work_city_id = city_idx
+
+                    if random.random() < 0.8:  # 80% employed
+                        # Decide if this person is a cross-city commuter
+                        if other_wps and random.random() < cross_city_prob:
+                            target_b = random.choice(other_wps)
+                            # Update work city id based on which city the workplace belongs to
+                            # Find city index for target_b by scanning membership
+                            for idx, wps in enumerate(city_workplaces):
+                                if target_b in wps:
+                                    p.work_city_id = idx
+                                    break
+                        else:
+                            target_b = random.choice(local_wps)
+
                         p.work_location = (target_b.bounds.centerx, target_b.bounds.centery)
 
         return cities
