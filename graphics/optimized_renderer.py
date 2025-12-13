@@ -20,17 +20,36 @@ class OptimizedRenderer:
         self.time_engine = None
         
         self.font = pygame.font.SysFont("Arial", 14)
+        self.font_large = pygame.font.SysFont("Arial", 18, bold=True)
+        self.font_small = pygame.font.SysFont("Arial", 12)
+        
+        # FPS tracking
+        self.fps_clock = pygame.time.Clock()
+        self.fps = 0.0
+
+        # Compute commuter stats (agents whose work city != home city)
+        self.total_agents = 0
+        self.total_commuters = 0
+        for city in self.cities:
+            for district in city.districts:
+                for p in district.people:
+                    self.total_agents += 1
+                    home_id = getattr(p, 'home_city_id', None)
+                    work_id = getattr(p, 'work_city_id', None)
+                    if home_id is not None and work_id is not None and work_id != home_id:
+                        self.total_commuters += 1
 
     def _create_assets(self):
         # Create circle surfaces for people
-        states = {
-            State.SUSCEPTIBLE: (100, 200, 255),
-            State.EXPOSED: (255, 255, 100),
-            State.INFECTIOUS: (255, 50, 50),
-            State.RECOVERED: (50, 200, 50),
+            # Use precomputed total agents and commuters
+            agents_text = self.font_small.render(f"Agents: {self.total_agents}", True, (200, 200, 200))
+            commuters_text = self.font_small.render(f"Commuters: {self.total_commuters}", True, (180,200,255))
             State.DECEASED: (50, 50, 50),
             State.VACCINATED: (200, 100, 255)
         }
+        
+        # Store state colors for legend rendering
+        self.state_colors = states
         
         self.person_surfs = {}
         for state, color in states.items():
@@ -48,6 +67,7 @@ class OptimizedRenderer:
                 pygame.draw.circle(g, (255, 200, 200), (8, 8), 3)
                 self.person_surfs['glow'] = g
 
+            self.screen.blit(commuters_text, (hud_x + 15, hud_y + 46))
     def set_world_data(self, cities):
         self.cities = cities
 
@@ -119,10 +139,87 @@ class OptimizedRenderer:
         # Render Visual Effects
         if self.visual_effects:
             self.visual_effects.render(self.screen, self.camera)
+        
+        # Render Legend
+        self._render_legend()
+        
+        # Render HUD (Time, FPS, Agent Count, Infection Rate)
+        self._render_hud()
             
         # Render Hover Info
         if self.interaction:
             self._render_hover_info()
+
+    def _render_legend(self):
+        """Draw state legend in top-left corner"""
+        legend_x = 15
+        legend_y = 15
+        box_w = 160
+        row_h = 24
+        padding = 10
+        
+        legend_items = [
+            (State.SUSCEPTIBLE, "Healthy"),
+            (State.EXPOSED, "Exposed"),
+            (State.INFECTIOUS, "Infected"),
+            (State.RECOVERED, "Recovered"),
+            (State.VACCINATED, "Vaccinated")
+        ]
+        
+        box_h = len(legend_items) * row_h + padding * 2
+        
+        # Background with semi-transparency
+        bg = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+        bg.fill((0, 0, 0, 180))
+        self.screen.blit(bg, (legend_x, legend_y))
+        
+        # Border
+        pygame.draw.rect(self.screen, (100, 120, 140), (legend_x, legend_y, box_w, box_h), 2)
+        
+        # Draw each state with its color
+        for i, (state, label) in enumerate(legend_items):
+            y = legend_y + padding + i * row_h
+            color = self.state_colors[state]
+            
+            # Color square
+            pygame.draw.rect(self.screen, color, (legend_x + padding, y + 4, 12, 12))
+            pygame.draw.rect(self.screen, (200, 200, 200), (legend_x + padding, y + 4, 12, 12), 1)
+            
+            # Label text
+            text = self.font.render(label, True, (220, 220, 220))
+            self.screen.blit(text, (legend_x + padding + 18, y + 3))
+
+    def _render_hud(self):
+        """Draw HUD with FPS and agent count only"""
+        # Calculate total agents
+        total_agents = 0
+        for city in self.cities:
+            for district in city.districts:
+                total_agents += len(district.people)
+        
+        # Top-right HUD panel (compact)
+        hud_x = self.screen.get_width() - 200
+        hud_y = 15
+        hud_w = 185
+        hud_h = 70
+        
+        # Background
+        hud_bg = pygame.Surface((hud_w, hud_h), pygame.SRCALPHA)
+        hud_bg.fill((0, 0, 0, 180))
+        self.screen.blit(hud_bg, (hud_x, hud_y))
+        
+        # Border
+        pygame.draw.rect(self.screen, (100, 180, 200), (hud_x, hud_y, hud_w, hud_h), 2)
+        
+        # FPS
+        self.fps = self.fps_clock.get_fps()
+        fps_color = (100, 200, 100) if self.fps > 45 else (255, 200, 100) if self.fps > 30 else (255, 100, 100)
+        fps_text = self.font_small.render(f"FPS: {self.fps:.1f}", True, fps_color)
+        self.screen.blit(fps_text, (hud_x + 15, hud_y + 10))
+        
+        # Total Agents
+        agents_text = self.font_small.render(f"Agents: {total_agents}", True, (200, 200, 200))
+        self.screen.blit(agents_text, (hud_x + 15, hud_y + 28))
 
     def _render_hover_info(self):
         info = self.interaction.get_hover_info()
