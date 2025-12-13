@@ -67,10 +67,42 @@ class NumpySimulationEngine:
         self.use_road_snapping = True  # Toggle for road-following behavior
         # Global speed multiplier (controlled via UI)
         self.speed_multiplier = 1.0
+        
+        # Spatial grid for infection optimization
+        # Divide world into cells to avoid O(N) proximity checks
+        self.grid_cell_size = max(20.0, self.infection_radius * 2.0)  # Cell size ~ 2x infection radius
+        self.spatial_grid = {}  # Maps (grid_x, grid_y) -> list of person indices
 
     def set_speed_multiplier(self, multiplier: float):
         # Clamp to reasonable range to avoid instability and maintain smoothness
         self.speed_multiplier = float(max(0.5, min(multiplier, 6.0)))
+    
+    def _update_spatial_grid(self):
+        """Rebuild spatial grid for this frame (O(N) but only ~constant cells per agent)"""
+        self.spatial_grid.clear()
+        for idx in range(self.num_people):
+            x, y = self.pos[idx]
+            gx = int(x / self.grid_cell_size)
+            gy = int(y / self.grid_cell_size)
+            grid_key = (gx, gy)
+            if grid_key not in self.spatial_grid:
+                self.spatial_grid[grid_key] = []
+            self.spatial_grid[grid_key].append(idx)
+    
+    def _get_nearby_agents(self, pos_x, pos_y, radius_sq):
+        """Get all agents within radius using spatial grid (O(1) avg case)"""
+        nearby = []
+        grid_radius = int(np.ceil(np.sqrt(radius_sq) / self.grid_cell_size)) + 1
+        gx = int(pos_x / self.grid_cell_size)
+        gy = int(pos_y / self.grid_cell_size)
+        
+        # Check surrounding cells
+        for dx in range(-grid_radius, grid_radius + 1):
+            for dy in range(-grid_radius, grid_radius + 1):
+                cell_key = (gx + dx, gy + dy)
+                if cell_key in self.spatial_grid:
+                    nearby.extend(self.spatial_grid[cell_key])
+        return nearby
 
     def update(self, time_engine, dt):
         # 1. Update Logic (State Transitions)
@@ -189,7 +221,10 @@ class NumpySimulationEngine:
             p.state = State(self.state[i])
 
     def _process_infections(self, infectious_indices):
-        """Graph-based infection with optional spatial spillover"""
+        """Graph-based infection with optional spatial spillover (grid-optimized)"""
+        # Rebuild spatial grid for this frame
+        self._update_spatial_grid()
+        
         # Primary transmission: Through social network
         for inf_idx in infectious_indices:
             infected_person = self.person_map[inf_idx]
@@ -212,24 +247,29 @@ class NumpySimulationEngine:
                         self.state[neighbor_idx] = State.EXPOSED.value
                         self.timer[neighbor_idx] = np.random.randint(100, 300)
         
-        # Secondary transmission: Spatial spillover (incidental contacts and cross-city spread)
-        # Increased for better cross-city infection spread
+        # Secondary transmission: Spatial spillover using grid optimization
         spatial_spillover_prob = self.infection_prob * float(getattr(self, 'spatial_spillover_factor', 0.3))
-        spatial_radius_sq = self.infection_radius_sq * 2.0  # Slightly expanded radius, less heavy than 4x
+        spatial_radius_sq = self.infection_radius_sq * 2.0  # Slightly expanded radius
         
         for inf_idx in infectious_indices:
             inf_pos = self.pos[inf_idx]
             
-            # Check nearby people (simple brute force for now, can optimize later)
-            diff = self.pos - inf_pos
-            d2 = np.sum(diff**2, axis=1)
+            # Use spatial grid to get nearby candidates (much faster than full N check)
+            close_candidates = self._get_nearby_agents(inf_pos[0], inf_pos[1], spatial_radius_sq)
             
-            # Find close susceptible people
-            close_mask = (d2 < spatial_radius_sq) & (self.state == State.SUSCEPTIBLE.value)
-            close_indices = np.where(close_mask)[0]
-            
-            for close_idx in close_indices:
-                if close_idx != inf_idx:  # Don't infect self
+            for close_idx in close_candidates:
+                if close_idx == inf_idx:
+                    continue
+                    
+                # Only infect if susceptible
+                if self.state[close_idx] != State.SUSCEPTIBLE.value:
+                    continue
+                
+                # Check actual distance
+                diff = self.pos[close_idx] - inf_pos
+                d2 = np.dot(diff, diff)
+                
+                if d2 < spatial_radius_sq:
                     if np.random.random() < spatial_spillover_prob:
                         self.state[close_idx] = State.EXPOSED.value
                         self.timer[close_idx] = np.random.randint(100, 300)

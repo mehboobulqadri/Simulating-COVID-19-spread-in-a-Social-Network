@@ -168,6 +168,11 @@ class UIManagerWrapper:
             self.god_mode_content.set_dimensions((win_w - 20, content_height))
             self.god_mode_scroller.set_scrollable_area_dimensions((win_w - 20, content_height))
 
+    def toggle_pause(self):
+        """Toggle pause state via keyboard shortcut"""
+        self.paused = not self.paused
+        self.btn_pause.set_text("Play" if self.paused else "Pause")
+
     def toggle_stats(self):
         if self.dashboard.window.visible:
             self.dashboard.window.hide()

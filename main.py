@@ -24,12 +24,14 @@ class BioSpatialApp:
         self.width = 1600
         self.height = 900
         
-        # Initialize Window (Standard Pygame)
-        self.screen = pygame.display.set_mode((self.width, self.height), pygame.DOUBLEBUF)
+        # Initialize Window (Standard Pygame) - RESIZABLE flag for window resizing
+        self.screen = pygame.display.set_mode((self.width, self.height), pygame.DOUBLEBUF | pygame.RESIZABLE)
         pygame.display.set_caption("Bio-Spatial Epidemic Simulator (Optimized)")
         
         self.clock = pygame.time.Clock()
         self.running = True
+        self.is_fullscreen = False  # Track fullscreen state
+        self.show_fps = True  # Toggle FPS display
         
         self.camera = Camera(self.width, self.height)
         
@@ -96,9 +98,11 @@ class BioSpatialApp:
     def save_simulation(self):
         print("Saving simulation...")
         if PersistenceManager.save_state("savegame.bio", self.cities, self.time_engine, self.stats_manager):
-            print("Save successful!")
+            print("✓ Save successful!")
+            return True
         else:
-            print("Save failed.")
+            print("✗ Save failed.")
+            return False
 
     def load_simulation(self):
         print("Loading simulation...")
@@ -113,9 +117,47 @@ class BioSpatialApp:
             # Reconnect references
             self.simulation_engine.cities = self.cities
             self.renderer.set_world_data(self.cities)
-            print("Load successful!")
+            print("✓ Load successful!")
+            return True
         else:
-            print("Load failed.")
+            print("✗ Load failed.")
+            return False
+
+    def export_data(self):
+        print("Exporting data to CSV...")
+        if DataExporter.export_csv("simulation_data.csv", self.stats_manager):
+            print("✓ Export successful! Data saved to simulation_data.csv")
+            return True
+        else:
+            print("✗ Export failed.")
+            return False
+
+    def toggle_fullscreen(self):
+        """Toggle fullscreen mode (F11)"""
+        self.is_fullscreen = not self.is_fullscreen
+        if self.is_fullscreen:
+            self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN | pygame.DOUBLEBUF)
+        else:
+            self.screen = pygame.display.set_mode((self.width, self.height), pygame.DOUBLEBUF | pygame.RESIZABLE)
+        pygame.display.set_caption("Bio-Spatial Epidemic Simulator (Optimized)")
+    
+    def handle_window_resize(self, new_width, new_height):
+        """Handle window resize event"""
+        if new_width > 0 and new_height > 0:
+            self.width = new_width
+            self.height = new_height
+            self.camera.width = new_width
+            self.camera.height = new_height
+            self.ui_surface = pygame.Surface((new_width, new_height), pygame.SRCALPHA)
+            self.renderer.screen = self.screen
+            # Update minimap position and size on window resize
+            self.minimap.size = 200  # Keep consistent size
+            self.minimap.x = new_width - self.minimap.size - 10
+            self.minimap.y = new_height - self.minimap.size - 10
+            self.minimap.rect = pygame.Rect(self.minimap.x, self.minimap.y, self.minimap.size, self.minimap.size)
+            # Update UI manager dimensions
+            self.ui_manager.width = new_width
+            self.ui_manager.height = new_height
 
     def export_data(self):
         print("Exporting data...")
@@ -140,6 +182,37 @@ class BioSpatialApp:
                 elif event.key == pygame.K_g:
                     # Toggle God Mode window via keyboard
                     self.ui_manager.toggle_god_mode()
+                elif event.key == pygame.K_F11:
+                    # Toggle fullscreen (F11)
+                    self.toggle_fullscreen()
+                elif event.key == pygame.K_SPACE:
+                    # Toggle pause (Space)
+                    self.ui_manager.toggle_pause()
+                elif event.key == pygame.K_EQUALS or event.key == pygame.K_PLUS:
+                    # Increase speed (+)
+                    new_speed = self.ui_manager.speed + 1.0
+                    self.ui_manager.sim_speed_slider.set_current_value(min(new_speed, 20.0))
+                elif event.key == pygame.K_MINUS:
+                    # Decrease speed (-)
+                    new_speed = self.ui_manager.speed - 1.0
+                    self.ui_manager.sim_speed_slider.set_current_value(max(new_speed, 0.5))
+                elif event.key == pygame.K_h:
+                    # Toggle FPS display (H)
+                    self.show_fps = not self.show_fps
+                # Save/Load shortcuts with Ctrl modifier
+                elif event.key == pygame.K_s and (event.mod & pygame.KMOD_CTRL):
+                    # Save (Ctrl+S)
+                    self.save_simulation()
+                elif event.key == pygame.K_l and (event.mod & pygame.KMOD_CTRL):
+                    # Load (Ctrl+L)
+                    self.load_simulation()
+                elif event.key == pygame.K_e and (event.mod & pygame.KMOD_CTRL):
+                    # Export (Ctrl+E)
+                    self.export_data()
+            elif event.type == pygame.VIDEORESIZE:
+                # Handle window resize
+                if not self.is_fullscreen:
+                    self.handle_window_resize(event.w, event.h)
             
             # Pass event to UI Manager
             self.ui_manager.handle_event(event)
@@ -182,14 +255,15 @@ class BioSpatialApp:
                 # Run simulation logic (infections + movement) with dt for smooth motion
                 self.simulation_engine.update(self.time_engine, dt)
                 
-                # Update stats every 10 ticks (optimization)
-                if self.time_engine.ticks % 10 == 0:
+                # Update stats every 20 ticks (optimization: reduced from 10 for better performance)
+                if self.time_engine.ticks % 20 == 0:
                     self.stats_manager.update(self.cities, self.time_engine.current_day + self.time_engine.hour/24)
 
     def render(self):
         # 1. Render World
-        # Keep full detail until very high speeds to prevent color loss
-        if self.ui_manager.speed > 14.0:
+        # Keep full detail until extreme speeds (only use min_detail above 18.0 speed)
+        # This preserves visual clarity at normal playing speeds
+        if self.ui_manager.speed > 18.0:
             self.renderer.render(min_detail=True)
         else:
             self.renderer.render()
@@ -203,6 +277,19 @@ class BioSpatialApp:
         # Render UI overlay (Time)
         time_surf = self.font_main.render(self.time_engine.get_time_string(), True, (255, 255, 255))
         self.ui_surface.blit(time_surf, (10, 10))
+        
+        # Render FPS counter if enabled (H key to toggle)
+        if self.show_fps:
+            fps = self.clock.get_fps()
+            # Color code: green >45, yellow >30, red <30
+            if fps > 45:
+                fps_color = (0, 255, 0)  # Green
+            elif fps > 30:
+                fps_color = (255, 255, 0)  # Yellow
+            else:
+                fps_color = (255, 0, 0)  # Red
+            fps_surf = self.font_main.render(f"FPS: {fps:.1f}", True, fps_color)
+            self.ui_surface.blit(fps_surf, (10, 40))
         
         # 3. Composite UI onto Screen
         self.renderer.render_overlay(self.ui_surface)
