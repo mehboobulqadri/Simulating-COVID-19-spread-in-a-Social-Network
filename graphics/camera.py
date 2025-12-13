@@ -95,3 +95,17 @@ class Camera:
         screen_x = (x - self.x) * self.zoom + self.width / 2
         screen_y = (y - self.y) * self.zoom + self.height / 2
         return int(screen_x), int(screen_y)
+
+    def frame_bounds(self, min_x, min_y, max_x, max_y, padding=200):
+        """Center and zoom camera to fit given world bounds."""
+        w = max_x - min_x
+        h = max_y - min_y
+        if w <= 0 or h <= 0:
+            return
+        w_p = w + 2 * padding
+        h_p = h + 2 * padding
+        zoom_x = self.width / w_p
+        zoom_y = self.height / h_p
+        self.zoom = min(zoom_x, zoom_y)
+        self.x = (min_x + max_x) / 2
+        self.y = (min_y + max_y) / 2
