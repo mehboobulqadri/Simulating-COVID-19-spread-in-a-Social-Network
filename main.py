@@ -38,7 +38,6 @@ class BioSpatialApp:
         # Initialize Core Systems
         self.time_engine = TimeEngine()
         self.cities = WorldGenerator.generate_world(num_cities=5)
-        self.world_bounds = self._compute_world_bounds(self.cities)
         self.simulation_engine = NumpySimulationEngine(self.cities)
         self.stats_manager = StatisticsManager()
         
@@ -50,10 +49,6 @@ class BioSpatialApp:
         self.ui_manager = UIManagerWrapper(self.width, self.height, self.simulation_engine)
         
         self.minimap = Minimap(self.width, self.height)
-        if self.world_bounds:
-            min_x, min_y, max_x, max_y = self.world_bounds
-            self.minimap.set_world_bounds(min_x, min_y, max_x, max_y)
-            self.camera.frame_bounds(min_x, min_y, max_x, max_y)
         
         # Connect systems
         self.renderer.visual_effects = self.visual_effects
@@ -65,18 +60,6 @@ class BioSpatialApp:
         
         # Pass data to renderer
         self.renderer.set_world_data(self.cities)
-
-    def _compute_world_bounds(self, cities):
-        xs = []
-        ys = []
-        for city in cities:
-            for district in city.districts:
-                r = district.bounds
-                xs.extend([r.left, r.right])
-                ys.extend([r.top, r.bottom])
-        if not xs or not ys:
-            return None
-        return (min(xs), min(ys), max(xs), max(ys))
 
     def _infect_patient_zero(self):
         pos = self.simulation_engine.infect_random_person()
@@ -124,10 +107,6 @@ class BioSpatialApp:
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self.running = False
-                elif event.key == pygame.K_f:
-                    if self.world_bounds:
-                        min_x, min_y, max_x, max_y = self.world_bounds
-                        self.camera.frame_bounds(min_x, min_y, max_x, max_y)
             
             # Pass event to UI Manager
             self.ui_manager.handle_event(event)
@@ -174,9 +153,6 @@ class BioSpatialApp:
     def render(self):
         # 1. Render World
         self.renderer.render()
-
-        # Render minimap overlay
-        self.minimap.render(self.screen, self.cities, self.camera)
         
         # 2. Render UI (Pygame Surface)
         self.ui_surface.fill((0, 0, 0, 0)) # Clear
