@@ -8,10 +8,12 @@ from entities.building import Building, BuildingType
 import networkx as nx
 
 class Road:
-    def __init__(self, start, end, width=10):
+    def __init__(self, start, end, width=10, kind="road"):
         self.start = start
         self.end = end
         self.width = width
+        # Tag whether this is a city road or inter-city highway (for hover info)
+        self.kind = kind
 
 class WorldGenerator:
     @staticmethod
@@ -81,13 +83,13 @@ class WorldGenerator:
             # Create Roads (Horizontal)
             for r in range(grid_h + 1):
                 y = start_y + r * block_size
-                road = Road((start_x, y), (start_x + grid_w * block_size, y), road_width)
+                road = Road((start_x, y), (start_x + grid_w * block_size, y), road_width, kind="road")
                 city.roads.append(road)
                 
             # Create Roads (Vertical)
             for c_idx in range(grid_w + 1):
                 x = start_x + c_idx * block_size
-                road = Road((x, start_y), (x, start_y + grid_h * block_size), road_width)
+                road = Road((x, start_y), (x, start_y + grid_h * block_size), road_width, kind="road")
                 city.roads.append(road)
             
             # Create Districts (Blocks)
@@ -174,7 +176,9 @@ class WorldGenerator:
                 for p in d.people:
                     p.home_city_id = city_idx
                     p.work_city_id = city_idx
-                    if random.random() < 0.8:  # 80% employed
+                    is_work_age = 16 <= getattr(p, 'age', 0) <= 65
+                    if is_work_age and random.random() < 0.8:  # 80% of working-age population is employed
+                        p.is_employed = True
                         if other_wps and random.random() < cross_city_prob:
                             target_b = random.choice(other_wps)
                             for idx, wps in enumerate(city_workplaces):
@@ -213,7 +217,7 @@ class WorldGenerator:
             distances.sort()
             for _, j, city_b in distances[:2]:
                 # Create highway between cities
-                road = Road(city_a.location, city_b.location, width=20)
+                road = Road(city_a.location, city_b.location, width=20, kind="highway")
                 # Store on both cities to avoid duplicates
                 if not hasattr(city_a, 'highways'):
                     city_a.highways = []

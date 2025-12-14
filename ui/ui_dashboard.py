@@ -30,11 +30,11 @@ class UIDashboard:
         
         # Legend Labels
         self.labels = {}
-        states = [State.INFECTIOUS, State.RECOVERED, State.DECEASED]
+        states = [State.INFECTIOUS, State.RECOVERED, State.VACCINATED]
         colors = {
             State.INFECTIOUS: (255, 50, 50),
             State.RECOVERED: (50, 200, 50),
-            State.DECEASED: (150, 150, 150)
+            State.VACCINATED: (200, 100, 255)
         }
         
         x_off = 10
@@ -100,5 +100,17 @@ class UIDashboard:
             
             if len(points) > 1:
                 pygame.draw.lines(self.graph_surface, self.colors[s], False, points, 2)
+        
+        # Draw vaccination rate as a purple line (scale 0-100%)
+        if hasattr(stats_manager, 'vaccination_rates') and stats_manager.vaccination_rates:
+            vax_points = []
+            for i, vax_rate in enumerate(stats_manager.vaccination_rates):
+                px = i * x_step
+                # Scale vaccination rate (0-100%) to graph height
+                py = h - (vax_rate / 100.0) * h
+                vax_points.append((px, py))
+            
+            if len(vax_points) > 1:
+                pygame.draw.lines(self.graph_surface, (200, 100, 255), False, vax_points, 2)
                 
         self.graph_image.set_image(self.graph_surface)

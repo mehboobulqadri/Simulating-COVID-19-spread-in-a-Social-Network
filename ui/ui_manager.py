@@ -148,6 +148,72 @@ class UIManagerWrapper:
                 container=self.god_mode_content
             )
             y += 40
+            
+            # Add Vaccination Area Selection Buttons
+            UILabel(
+                relative_rect=pygame.Rect(10, y, 260, 20),
+                text='Vaccination Area:',
+                manager=self.manager,
+                container=self.god_mode_content
+            )
+            y += 30
+            
+            self.btn_vax_everyone = UIButton(
+                relative_rect=pygame.Rect(10, y, 260, 30),
+                text="Vaccinate All (Nationwide)",
+                manager=self.manager,
+                container=self.god_mode_content
+            )
+            y += 35
+            
+            self.btn_vax_city = UIButton(
+                relative_rect=pygame.Rect(10, y, 260, 30),
+                text="Vaccinate First City Only",
+                manager=self.manager,
+                container=self.god_mode_content
+            )
+            y += 35
+            
+            self.btn_vax_district = UIButton(
+                relative_rect=pygame.Rect(10, y, 260, 30),
+                text="Vaccinate Random District",
+                manager=self.manager,
+                container=self.god_mode_content
+            )
+            y += 40
+            
+            # Add Vaccination Speed Control
+            UILabel(
+                relative_rect=pygame.Rect(10, y, 260, 20),
+                text='Vaccination Speed:',
+                manager=self.manager,
+                container=self.god_mode_content
+            )
+            y += 25
+            self.vax_speed_slider = UIHorizontalSlider(
+                relative_rect=pygame.Rect(10, y, 260, 20),
+                start_value=0.5,
+                value_range=(0.1, 5.0),
+                manager=self.manager,
+                container=self.god_mode_content
+            )
+            # Value label sits below the slider to avoid text overlap
+            self.vax_speed_label = UILabel(
+                relative_rect=pygame.Rect(10, y + 25, 260, 20),
+                text='Speed: 0.5x',
+                manager=self.manager,
+                container=self.god_mode_content
+            )
+            y += 70
+            
+            # Add Vaccination Rate Label (info display)
+            self.vax_rate_label = UILabel(
+                relative_rect=pygame.Rect(10, y, 260, 30),
+                text="Vaccination Rate: 0%",
+                manager=self.manager,
+                container=self.god_mode_content
+            )
+            y += 40
 
             # Add Speed control inside Control Panel
             UILabel(
@@ -197,6 +263,18 @@ class UIManagerWrapper:
             elif self.god_mode_window and hasattr(self, 'btn_road_snap') and event.ui_element == self.btn_road_snap:
                 self.engine.use_road_snapping = not self.engine.use_road_snapping
                 self.btn_road_snap.set_text(f"Road Snapping: {'ON' if self.engine.use_road_snapping else 'OFF'}")
+            elif self.god_mode_window and hasattr(self, 'btn_vax_everyone') and event.ui_element == self.btn_vax_everyone:
+                # Vaccinate entire population
+                self.engine.vaccinate_area('all')
+                print("✓ Started nationwide vaccination campaign")
+            elif self.god_mode_window and hasattr(self, 'btn_vax_city') and event.ui_element == self.btn_vax_city:
+                # Vaccinate first city only
+                self.engine.vaccinate_area('city')
+                print("✓ Started city-wide vaccination campaign")
+            elif self.god_mode_window and hasattr(self, 'btn_vax_district') and event.ui_element == self.btn_vax_district:
+                # Vaccinate random district
+                self.engine.vaccinate_area('district')
+                print("✓ Started district vaccination campaign")
                 
         elif event.type == pygame_gui.UI_HORIZONTAL_SLIDER_MOVED:
             if event.ui_element == self.slider_speed:
@@ -218,11 +296,21 @@ class UIManagerWrapper:
                     self.speed_label.set_text(f"Speed: {self.speed:.1f}x")
                     if hasattr(self.engine, 'set_speed_multiplier'):
                         self.engine.set_speed_multiplier(self.speed)
+                # Vaccination speed slider
+                if hasattr(self, 'vax_speed_slider') and event.ui_element == self.vax_speed_slider:
+                    self.engine.vaccination_rate = event.value / 100.0  # Convert to percentage
+                    if hasattr(self, 'vax_speed_label'):
+                        self.vax_speed_label.set_text(f'Speed: {event.value:.1f}x')
+
+    def update_vaccination_display(self):
+        """Update vaccination rate display in UI"""
+        if hasattr(self, 'vax_rate_label') and self.vax_rate_label:
+            vax_rate = self.engine.get_vaccination_rate() * 100
+            self.vax_rate_label.set_text(f"Vaccination Rate: {vax_rate:.1f}%")
 
     def update(self, time_delta, stats_manager=None):
         self.manager.update(time_delta)
         if stats_manager:
             self.dashboard.update(stats_manager)
-
-    def draw(self, screen):
-        self.manager.draw_ui(screen)
+        # Update vaccination display every update
+        self.update_vaccination_display()

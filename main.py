@@ -52,9 +52,14 @@ class BioSpatialApp:
         # Initialize Visuals & Interaction
         self.visual_effects = VisualEffects()
         self.interaction = Interaction(self.camera)
+        self.interaction.tracing_enabled = True
         
         # Fonts
         self.font_main = pygame.font.SysFont("Arial", 20)
+        
+        # Infect mode state
+        self.infect_mode = False
+        self.infect_radius = 75  # Radius for infection zone
 
         # New UI Manager
         self.ui_manager = UIManagerWrapper(self.width, self.height, self.simulation_engine)
@@ -94,6 +99,31 @@ class BioSpatialApp:
         if pos is not None:
             self.visual_effects.add_infection_effect(pos[0], pos[1])
             print(f"Patient Zero infected at {pos}")
+    
+    def _infect_at_point(self, world_pos, radius=75):
+        """Infect all agents within a circular zone at the given point"""
+        infected_count = 0
+        zone_x, zone_y = world_pos
+        
+        # Check all agents in the numpy engine
+        for idx in range(self.simulation_engine.num_people):
+            agent_x, agent_y = self.simulation_engine.pos[idx]
+            dist_sq = (agent_x - zone_x) ** 2 + (agent_y - zone_y) ** 2
+            
+            if dist_sq < radius ** 2:
+                # Only infect susceptible agents
+                if self.simulation_engine.state[idx] == State.SUSCEPTIBLE.value:
+                    self.simulation_engine.state[idx] = State.EXPOSED.value
+                    self.simulation_engine.timer[idx] = 100
+                    infected_count += 1
+                    self.visual_effects.add_infection_effect(agent_x, agent_y)
+        
+        if infected_count > 0:
+            print(f"✓ Infected {infected_count} agents at ({zone_x:.0f}, {zone_y:.0f})")
+        else:
+            print(f"⚠ No susceptible agents in radius at ({zone_x:.0f}, {zone_y:.0f})")
+        
+        return infected_count
 
     def save_simulation(self):
         print("Saving simulation...")
@@ -124,13 +154,34 @@ class BioSpatialApp:
             return False
 
     def export_data(self):
-        print("Exporting data to CSV...")
+        print("Exporting simulation data...")
+        # Export multiple formats
+        success = True
+        
+        # CSV export
         if DataExporter.export_csv("simulation_data.csv", self.stats_manager):
-            print("✓ Export successful! Data saved to simulation_data.csv")
-            return True
+            print("✓ CSV export successful!")
         else:
-            print("✗ Export failed.")
-            return False
+            success = False
+        
+        # HTML report export
+        if DataExporter.export_html("simulation_report.html", self.stats_manager, self.cities):
+            print("✓ HTML report generated!")
+        else:
+            success = False
+        
+        # JSON export
+        if DataExporter.export_json("simulation_data.json", self.stats_manager, self.cities):
+            print("✓ JSON export successful!")
+        else:
+            success = False
+        
+        if success:
+            print("✓ All exports completed successfully!")
+        else:
+            print("⚠ Some exports failed")
+        
+        return success
 
     def toggle_fullscreen(self):
         """Toggle fullscreen mode (F11)"""
@@ -199,6 +250,10 @@ class BioSpatialApp:
                 elif event.key == pygame.K_h:
                     # Toggle FPS display (H)
                     self.show_fps = not self.show_fps
+                elif event.key == pygame.K_t:
+                    # Enter box-select tracing mode
+                    self.interaction.tracing_enabled = True
+                    self.interaction.begin_box_select()
                 # Save/Load shortcuts with Ctrl modifier
                 elif event.key == pygame.K_s and (event.mod & pygame.KMOD_CTRL):
                     # Save (Ctrl+S)
@@ -209,6 +264,22 @@ class BioSpatialApp:
                 elif event.key == pygame.K_e and (event.mod & pygame.KMOD_CTRL):
                     # Export (Ctrl+E)
                     self.export_data()
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1 and self.interaction.box_select_active:
+                    self.interaction.start_box(pygame.mouse.get_pos())
+                elif event.button == 1 and (pygame.key.get_mods() & pygame.KMOD_SHIFT):  # Left click + Shift
+                    mouse_x, mouse_y = pygame.mouse.get_pos()
+                    world_pos = self.camera.screen_to_world(mouse_x, mouse_y)
+                    self._infect_at_point(world_pos, self.infect_radius)
+                elif event.button == 1:
+                    self.interaction.select_entity_at_mouse(self.cities)
+                elif event.button == 3:
+                    self.interaction.clear_selection()
+            elif event.type == pygame.MOUSEMOTION:
+                self.interaction.update_box(pygame.mouse.get_pos())
+            elif event.type == pygame.MOUSEBUTTONUP:
+                if event.button == 1 and self.interaction.box_select_active:
+                    self.interaction.finalize_box_select(self.cities)
             elif event.type == pygame.VIDEORESIZE:
                 # Handle window resize
                 if not self.is_fullscreen:
@@ -255,9 +326,16 @@ class BioSpatialApp:
                 # Run simulation logic (infections + movement) with dt for smooth motion
                 self.simulation_engine.update(self.time_engine, dt)
                 
+                # Update vaccination efficacy decay
+                self.simulation_engine.update_vaccination_efficacy(days=1/20)  # Update proportionally per tick
+                
                 # Update stats every 20 ticks (optimization: reduced from 10 for better performance)
                 if self.time_engine.ticks % 20 == 0:
-                    self.stats_manager.update(self.cities, self.time_engine.current_day + self.time_engine.hour/24)
+                    self.stats_manager.update(self.cities, self.time_engine.current_day + self.time_engine.hour/24, engine=self.simulation_engine)
+
+            # Record trace point for the currently selected person
+            self.interaction.record_trace_point()
+
 
     def render(self):
         # 1. Render World
@@ -268,8 +346,9 @@ class BioSpatialApp:
         else:
             self.renderer.render()
 
-        # Minimap overlay: Always render (user requested it never disappears)
-        self.minimap.render(self.screen, self.cities, self.camera)
+        # Minimap overlay: Always render; include trace polyline when active
+        trace_pts = self.interaction.trace_points if (self.interaction.tracing_enabled and self.interaction.trace_points) else None
+        self.minimap.render(self.screen, self.cities, self.camera, trace_pts)
         
         # 2. Render UI (Pygame Surface)
         self.ui_surface.fill((0, 0, 0, 0)) # Clear
@@ -290,12 +369,20 @@ class BioSpatialApp:
                 fps_color = (255, 0, 0)  # Red
             fps_surf = self.font_main.render(f"FPS: {fps:.1f}", True, fps_color)
             self.ui_surface.blit(fps_surf, (10, 40))
+
+        # Render tracing status
+        if self.interaction.tracing_enabled and self.interaction.selected_entity:
+            state_name = getattr(getattr(self.interaction.selected_entity, 'state', None), 'name', 'Unknown')
+            trace_txt = f"Tracing: {getattr(self.interaction.selected_entity, 'uid', 'unknown')} ({state_name})"
+            trace_surf = self.font_main.render(trace_txt, True, (0, 240, 255))
+            self.ui_surface.blit(trace_surf, (10, 70))
         
+        # Render drag-to-infect visual feedback
         # 3. Composite UI onto Screen
         self.renderer.render_overlay(self.ui_surface)
         
         # 4. Draw Pygame GUI (Directly to screen)
-        self.ui_manager.draw(self.screen)
+        self.ui_manager.manager.draw_ui(self.screen)
         
         # 5. Swap Buffers
         pygame.display.flip()

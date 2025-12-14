@@ -59,7 +59,7 @@ class Minimap:
         camera.x = wx
         camera.y = wy
 
-    def render(self, screen, cities, camera):
+    def render(self, screen, cities, camera, trace_points=None):
         # Background
         UITheme.draw_panel_bg(screen, self.rect)
         
@@ -87,6 +87,31 @@ class Minimap:
                     color = (100 + int(155 * ratio), 100 - int(100 * ratio), 100 - int(100 * ratio))
                 
                 pygame.draw.rect(screen, color, (dx, dy, dw, dh))
+
+        # Draw trace polyline (cyan) if provided
+        if trace_points and len(trace_points) > 1:
+            pts = []
+            for pair in trace_points:
+                try:
+                    wx, wy = pair
+                    # Validate coordinates are numbers
+                    if wx is None or wy is None:
+                        continue
+                    wx, wy = float(wx), float(wy)
+                    mx = self.x + (wx - ox) * self.scale_x
+                    my = self.y + (wy - oy) * self.scale_y
+                    # Ensure mx, my are floats/ints, not numpy scalars
+                    mx, my = float(mx), float(my)
+                    pts.append((mx, my))
+                except (TypeError, ValueError, AttributeError):
+                    continue
+            # Only draw if we have valid points
+            if len(pts) > 1:
+                try:
+                    pygame.draw.lines(screen, (0, 240, 255), False, pts, 2)
+                except (TypeError, ValueError):
+                    # Silently skip on any remaining issues
+                    pass
                 
         # Draw Camera Viewport
         # Camera x,y is center.

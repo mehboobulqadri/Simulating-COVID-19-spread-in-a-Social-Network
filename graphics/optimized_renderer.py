@@ -59,6 +59,11 @@ class OptimizedRenderer:
         
         # Store state colors for legend rendering
         self.state_colors = states
+        # Trace highlight surface
+        trace = pygame.Surface((14, 14), pygame.SRCALPHA)
+        pygame.draw.circle(trace, (0, 240, 255), (7, 7), 6)
+        pygame.draw.circle(trace, (0, 120, 150), (7, 7), 6, 2)
+        self.trace_surf = trace
         
         self.person_surfs = {}
         for state, color in states.items():
@@ -142,7 +147,14 @@ class OptimizedRenderer:
                     for p in district.people:
                         px, py = self.camera.apply(p.x, p.y)
                         
-                        if p.state == State.INFECTIOUS:
+                        if self.interaction and getattr(self.interaction, 'tracing_enabled', True) and getattr(self.interaction, 'selected_entity', None) is p:
+                            blits.append((self.trace_surf, (px - 7, py - 7)))
+                        
+                        # Check vaccination status first (takes priority over base state)
+                        if hasattr(p, 'is_vaccinated') and p.is_vaccinated:
+                            surf = self.person_surfs[State.VACCINATED]
+                            offset = 4
+                        elif p.state == State.INFECTIOUS:
                             surf = self.person_surfs['glow']
                             offset = 8
                         else:
@@ -152,6 +164,13 @@ class OptimizedRenderer:
                         blits.append((surf, (px - offset, py - offset)))
                     
                     self.screen.blits(blits)
+
+        # Draw trace polyline for selected person
+        if self.interaction and getattr(self.interaction, 'tracing_enabled', False):
+            pts = getattr(self.interaction, 'trace_points', [])
+            if pts and len(pts) > 1:
+                screen_pts = [self.camera.apply(px, py) for px, py in pts]
+                pygame.draw.lines(self.screen, (0, 240, 255), False, screen_pts, 2)
 
         # Render Visual Effects (skip at minimal detail)
         if self.visual_effects and not min_detail:
@@ -167,6 +186,17 @@ class OptimizedRenderer:
         # Render Hover Info (skip at minimal detail)
         if self.interaction and not min_detail:
             self._render_hover_info()
+
+        # Render selection box overlay if active
+        if self.interaction and getattr(self.interaction, 'box_select_active', False):
+            if self.interaction.box_start and self.interaction.box_end:
+                x1, y1 = self.interaction.box_start
+                x2, y2 = self.interaction.box_end
+                rect = pygame.Rect(min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1))
+                overlay = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+                overlay.fill((0, 200, 255, 60))
+                self.screen.blit(overlay, rect.topleft)
+                pygame.draw.rect(self.screen, (0, 240, 255), rect, 2)
 
     def _render_legend(self):
         """Draw state legend in top-left corner"""
