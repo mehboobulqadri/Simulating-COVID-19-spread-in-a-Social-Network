@@ -1,5 +1,6 @@
 import pygame
 from ui.theme import UITheme
+from entities.person import State
 
 class Minimap:
     def __init__(self, screen_width, screen_height, world_width=2000, world_height=2000):
@@ -59,7 +60,7 @@ class Minimap:
         camera.x = wx
         camera.y = wy
 
-    def render(self, screen, cities, camera, trace_points=None):
+    def render(self, screen, cities, camera, trace_points=None, simulation_engine=None):
         # Background
         UITheme.draw_panel_bg(screen, self.rect)
         
@@ -84,22 +85,61 @@ class Minimap:
                 dw = r.width * self.scale_x
                 dh = r.height * self.scale_y
                 
-                color = (100, 100, 120)
-                # Maybe color by infection?
-                # Check infection rate
-                infected = len([p for p in district.people if p.state.name == 'INFECTIOUS'])
-                if infected > 0:
-                    ratio = infected / len(district.people)
-                    color = (100 + int(155 * ratio), 100 - int(100 * ratio), 100 - int(100 * ratio))
+                # Count all infection states from simulation engine (actual current state)
+                total_pop = len(district.people)
+                exposed = 0
+                infectious = 0
+                
+                if simulation_engine:
+                    # Use actual simulation state
+                    for p in district.people:
+                        idx = simulation_engine.person_to_index.get(p)
+                        if idx is not None:
+                            state_val = simulation_engine.state[idx]
+                            if state_val == 1:  # EXPOSED
+                                exposed += 1
+                            elif state_val == 2:  # INFECTIOUS
+                                infectious += 1
+                else:
+                    # Fallback to person objects (might be stale)
+                    exposed = sum(1 for p in district.people if p.state.name == 'EXPOSED')
+                    infectious = sum(1 for p in district.people if p.state.name == 'INFECTIOUS')
+                
+                # Calculate infection ratio
+                infection_ratio = (exposed + infectious) / total_pop if total_pop > 0 else 0
+                
+                # Direct color mapping based on infection severity
+                if infection_ratio < 0.05:
+                    # Clean (< 5%): dark grey
+                    color = (60, 65, 70)
+                elif infection_ratio < 0.15:
+                    # Light spread (5-15%): grey-yellow
+                    t = (infection_ratio - 0.05) / 0.10
+                    color = (int(60 + 140 * t), int(65 + 150 * t), int(70 - 20 * t))
+                elif infection_ratio < 0.35:
+                    # Medium spread (15-35%): yellow-orange
+                    t = (infection_ratio - 0.15) / 0.20
+                    color = (int(200 + 40 * t), int(215 - 100 * t), int(50 - 30 * t))
+                elif infection_ratio < 0.60:
+                    # High spread (35-60%): orange-red
+                    t = (infection_ratio - 0.35) / 0.25
+                    color = (int(240 + 15 * t), int(115 - 85 * t), int(20 - 10 * t))
+                else:
+                    # Critical (>60%): deep red
+                    color = (255, 30, 10)
                 
                 pygame.draw.rect(screen, color, (dx, dy, dw, dh))
                 
-                # Draw people as tiny dots (only if zoomed enough for detail)
-                if len(district.people) > 0 and dw > 10:
-                    for p in district.people:
-                        px = int(self.x + (p.x - ox) * self.scale_x)
-                        py = int(self.y + (p.y - oy) * self.scale_y)
-                        pygame.draw.circle(screen, (150, 150, 200), (px, py), 1)
+                # Draw border based on infection level
+                if infection_ratio > 0.35:
+                    border_color = (255, 20, 20)  # Red for high
+                    pygame.draw.rect(screen, border_color, (dx, dy, dw, dh), 2)
+                elif infection_ratio > 0.15:
+                    border_color = (255, 140, 30)  # Orange for medium
+                    pygame.draw.rect(screen, border_color, (dx, dy, dw, dh), 1)
+                elif infection_ratio > 0.05:
+                    border_color = (255, 220, 80)  # Yellow for low
+                    pygame.draw.rect(screen, border_color, (dx, dy, dw, dh), 1)
         if trace_points and len(trace_points) > 1:
             pts = []
             for pair in trace_points:
