@@ -22,6 +22,11 @@ class Interaction:
         self.box_select_active = False
         self.box_start = None
         self.box_end = None
+        
+        # Quarantine selection mode
+        self.quarantine_selection_mode = False
+        self.quarantined_districts = set()  # Track quarantined districts
+        self.quarantined_buildings = set()  # Track quarantined buildings
 
     def _screen_to_world(self, sx, sy):
         """Convert screen coordinates to world coordinates using camera."""
@@ -158,10 +163,14 @@ class Interaction:
         if best_person:
             return best_person
 
-        # District under cursor (if no person was closer)
+        # District or Building under cursor (if no person was closer)
         for city in cities:
             for district in city.districts:
                 if district.bounds.collidepoint(x, y):
+                    # Try to refine to building
+                    for b in district.buildings:
+                        if b.bounds.collidepoint(x, y):
+                            return b
                     return district
 
         # Roads and highways (show info even when not over districts)
@@ -208,15 +217,20 @@ class Interaction:
             pop = sum(len(d.people) for d in ent.districts)
             info.append(f"Population: {pop}")
             
-        elif hasattr(ent, 'people'): # District
+        elif hasattr(ent, 'people') and hasattr(ent, 'bounds'): # District
             info.append(f"District: {ent.name}")
             info.append(f"Population: {len(ent.people)}")
             infected = sum(1 for p in ent.people if p.state.name == 'INFECTIOUS')
             info.append(f"Infected: {infected}")
+        elif hasattr(ent, 'type') and hasattr(ent, 'bounds'): # Building
+            btype = getattr(ent.type, 'name', 'UNKNOWN')
+            info.append(f"Building: {btype}")
             
         elif hasattr(ent, 'state'): # Person
             info.append(f"Person: {ent.uid}")
             info.append(f"State: {ent.state.name}")
+            if hasattr(ent, 'variant'):
+                info.append(f"Variant: {ent.variant}")
             info.append(f"Age: {ent.age}")
             if ent.work_location:
                 info.append("Has Job")
@@ -254,3 +268,12 @@ class Interaction:
         self.trace_points = []
         if ent and hasattr(ent, 'x'):
             self.trace_points.append((float(ent.x), float(ent.y)))
+    
+    def toggle_quarantine_selection(self):
+        """Toggle quarantine selection mode on/off"""
+        self.quarantine_selection_mode = not self.quarantine_selection_mode
+        if self.quarantine_selection_mode:
+            print("🎯 QUARANTINE SELECTION MODE: Click districts/buildings to quarantine them")
+        else:
+            print("🎯 Quarantine selection mode OFF")
+        return self.quarantine_selection_mode

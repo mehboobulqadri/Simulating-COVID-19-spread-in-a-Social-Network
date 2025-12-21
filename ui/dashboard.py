@@ -5,7 +5,7 @@ from ui.theme import UITheme
 class Dashboard:
     def __init__(self, screen_width, screen_height):
         self.width = 300
-        self.height = 180 # Increased height
+        self.height = 200  # Increased height for more info
         self.x = 10
         self.y = screen_height - self.height - 10
         self.rect = pygame.Rect(self.x, self.y, self.width, self.height)
@@ -19,6 +19,9 @@ class Dashboard:
             State.DECEASED: (150, 150, 150),
             State.VACCINATED: (200, 100, 255)
         }
+        
+        # Smoothing for stats
+        self.last_counts = {s: 0 for s in State}
 
     def render(self, screen, stats_manager):
         # Background
@@ -63,7 +66,11 @@ class Dashboard:
         # Legend / Current Stats
         latest = stats_manager.get_latest_counts()
         
-        # Draw mini legend at top of panel
+        # Draw mini legend at top of panel with title
+        title_font = UITheme.get_font(12, bold=True)
+        title_surf = title_font.render("Epidemic Status", True, (200, 200, 200))
+        screen.blit(title_surf, (self.x + 10, self.y + 5))
+        
         legend_items = [
             (State.INFECTIOUS, "Inf"),
             (State.RECOVERED, "Rec"),
@@ -71,14 +78,17 @@ class Dashboard:
             (State.VACCINATED, "Vac")
         ]
         
-        font = UITheme.get_font(12, bold=True)
+        font = UITheme.get_font(11)
         
         x_off = self.x + 10
-        y_off = self.y + 5
+        y_off = self.y + 22
         
         for i, (state, label) in enumerate(legend_items):
             color = self.colors[state]
             text = f"{label}: {latest[state]}"
             surf = font.render(text, True, color)
-            screen.blit(surf, (x_off + i * 70, y_off))
+            if i < 2:
+                screen.blit(surf, (x_off, y_off))
+            else:
+                screen.blit(surf, (x_off + 150, y_off))
 

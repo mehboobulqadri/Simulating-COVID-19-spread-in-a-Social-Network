@@ -8,14 +8,17 @@ class ControlPanel:
         # Animation states - start hidden off-screen
         self.offset_x = -self.width
         self.target_x = -self.width
-        self.speed_anim = 0.2  # Smoothing factor for animation
+        self.speed_anim = 0.45  # Softer easing for smoother slide
+        self.velocity = 0.0     # For damped spring motion
         
         self.x = self.offset_x
         self.y = 0
         self.rect = pygame.Rect(self.x, self.y, self.width, self.height)
         
         # Hover detection zone (thin strip on left edge)
-        self.hover_zone_width = 0
+        self.hover_zone_width = 18
+        self.pinned = False
+        self.pin_rect = pygame.Rect(self.width - 34, 20, 16, 16)
         
         self.paused = False
         self.speed = 1.0
@@ -82,7 +85,7 @@ class ControlPanel:
         # Section separator
         y_offset += 20
         
-        # God Mode Button (Special styling) - REMOVED
+
         # self.buttons.append({
         #     'label': 'GOD MODE',
         #     'rect': pygame.Rect(button_x, y_offset, button_width, 55),
@@ -92,14 +95,21 @@ class ControlPanel:
         # })
 
     def update(self, mouse_pos):
-        # Hover detection - show panel when mouse near left edge OR over the panel
-        if mouse_pos[0] <= self.hover_zone_width or (self.offset_x > -self.width and mouse_pos[0] < self.width):
+        # Hover detection - show panel when mouse near left edge OR over the panel, or pinned
+        if self.pinned:
+            self.target_x = 0
+        elif mouse_pos[0] <= self.hover_zone_width or (self.offset_x > -self.width and mouse_pos[0] < self.width):
             self.target_x = 0
         else:
             self.target_x = -self.width
         
-        # Smooth animation
-        self.offset_x += (self.target_x - self.offset_x) * self.speed_anim
+        # Damped spring animation for a softer overshoot
+        delta = self.target_x - self.offset_x
+        self.velocity = self.velocity * 0.7 + delta * self.speed_anim
+        self.offset_x += self.velocity
+        if abs(delta) < 0.5 and abs(self.velocity) < 0.4:
+            self.offset_x = self.target_x
+            self.velocity = 0.0
         
         # Clamp offset_x to ensure it doesn't go beyond bounds
         if self.offset_x > 0:
@@ -108,6 +118,7 @@ class ControlPanel:
             self.offset_x = -self.width
             
         self.rect.x = self.offset_x
+        self.pin_rect.x = self.offset_x + self.width - 34
         
         # Update button positions relative to panel movement
         for btn in self.buttons:
@@ -144,6 +155,9 @@ class ControlPanel:
                     break
         
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.pin_rect.collidepoint(event.pos):
+                self.pinned = not self.pinned
+                return True
             for btn in self.buttons:
                 if btn['rect'].collidepoint(event.pos):
                     btn['action']()
@@ -202,6 +216,19 @@ class ControlPanel:
         if self.offset_x < -self.width + 5:
             indicator_rect = pygame.Rect(0, self.height // 2 - 30, 3, 60)
             pygame.draw.rect(screen, UITheme.ACCENT_COLOR, indicator_rect, border_radius=2)
+
+        # Pin toggle
+        pin_hover = self.pin_rect.collidepoint(pygame.mouse.get_pos())
+        pin_bg = pygame.Color(40, 40, 50, 220)
+        pygame.draw.rect(screen, pin_bg, self.pin_rect, border_radius=4)
+        pygame.draw.rect(screen, UITheme.ACCENT_COLOR if (self.pinned or pin_hover) else (120, 120, 130), self.pin_rect, 2, border_radius=4)
+        # Draw a small pin glyph
+        cx = self.pin_rect.centerx
+        cy = self.pin_rect.centery
+        pygame.draw.line(screen, (220, 220, 230), (cx, cy - 4), (cx, cy + 4), 2)
+        pygame.draw.line(screen, (220, 220, 230), (cx - 4, cy), (cx + 4, cy), 2)
+        if self.pinned:
+            pygame.draw.circle(screen, UITheme.ACCENT_COLOR, (cx, cy), 3)
 
     def _draw_god_button(self, screen, rect, text, hover):
         # Special gold/red styling for god mode

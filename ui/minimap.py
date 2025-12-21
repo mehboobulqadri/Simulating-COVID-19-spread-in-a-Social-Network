@@ -63,13 +63,19 @@ class Minimap:
         # Background
         UITheme.draw_panel_bg(screen, self.rect)
         
+        # Title
+        font = UITheme.get_font(12, bold=True)
+        title = font.render("Minimap", True, (200, 200, 200))
+        screen.blit(title, (self.x + 5, self.y - 20))
+        
         # Draw Cities/Districts
         ox, oy = self.world_origin
         for city in cities:
             # City Dot
             cx = self.x + (city.location[0] - ox) * self.scale_x
             cy = self.y + (city.location[1] - oy) * self.scale_y
-            pygame.draw.circle(screen, (200, 200, 200), (cx, cy), 3)
+            pygame.draw.circle(screen, (200, 200, 200), (cx, cy), 4)
+            pygame.draw.circle(screen, (100, 100, 100), (cx, cy), 4, 1)
             
             for district in city.districts:
                 r = district.bounds
@@ -87,8 +93,13 @@ class Minimap:
                     color = (100 + int(155 * ratio), 100 - int(100 * ratio), 100 - int(100 * ratio))
                 
                 pygame.draw.rect(screen, color, (dx, dy, dw, dh))
-
-        # Draw trace polyline (cyan) if provided
+                
+                # Draw people as tiny dots (only if zoomed enough for detail)
+                if len(district.people) > 0 and dw > 10:
+                    for p in district.people:
+                        px = int(self.x + (p.x - ox) * self.scale_x)
+                        py = int(self.y + (p.y - oy) * self.scale_y)
+                        pygame.draw.circle(screen, (150, 150, 200), (px, py), 1)
         if trace_points and len(trace_points) > 1:
             pts = []
             for pair in trace_points:
@@ -138,3 +149,39 @@ class Minimap:
         clip_rect = self.rect.clip(view_rect)
         if clip_rect.width > 0 and clip_rect.height > 0:
              pygame.draw.rect(screen, (255, 255, 255), clip_rect, 1)
+        
+        # Building legend below minimap
+        self._render_legend(screen, cities)
+    
+    def _render_legend(self, screen, cities):
+        """Render building type legend below minimap."""
+        from entities.building import BuildingType
+        
+        # Count buildings by type
+        building_counts = {bt: 0 for bt in BuildingType}
+        for city in cities:
+            for district in city.districts:
+                for b in district.buildings:
+                    building_counts[b.type] += 1
+        
+        # Building type colors and symbols
+        building_info = [
+            (BuildingType.RESIDENTIAL, "Res", (100, 200, 100)),
+            (BuildingType.WORKPLACE, "Work", (100, 100, 200)),
+            (BuildingType.HOSPITAL, "Hosp", (255, 255, 255)),
+            (BuildingType.COMMERCIAL, "Comm", (240, 180, 60)),
+            (BuildingType.SCHOOL, "School", (220, 120, 120)),
+            (BuildingType.PARK, "Park", (50, 160, 80))
+        ]
+        
+        font_small = UITheme.get_font(10)
+        legend_y = self.y + self.size + 15
+        legend_x = self.x
+        
+        for i, (btype, label, color) in enumerate(building_info):
+            count = building_counts[btype]
+            # Color square
+            pygame.draw.rect(screen, color, (legend_x, legend_y + i * 16, 12, 12))
+            # Label and count
+            text = font_small.render(f"{label}: {count}", True, (200, 200, 200))
+            screen.blit(text, (legend_x + 18, legend_y + i * 16))

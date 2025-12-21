@@ -9,7 +9,8 @@ class RightStatsPanel:
         # Animation states - start hidden off-screen
         self.offset_x = screen_width
         self.target_x = screen_width
-        self.speed_anim = 0.2
+        self.speed_anim = 0.45  # Softer easing for smoother slide
+        self.velocity = 0.0     # For damped spring motion
         
         self.screen_width = screen_width
         self.x = self.offset_x
@@ -17,7 +18,10 @@ class RightStatsPanel:
         self.rect = pygame.Rect(self.x, self.y, self.width, self.height)
         
         # Hover detection zone (thin strip on right edge)
-        self.hover_zone_width = 3
+        self.hover_zone_width = 18
+        self.pinned = False
+        # Place pin away from top-right to avoid overlap with God Mode button
+        self.pin_rect = pygame.Rect(self.offset_x + 12, 20, 16, 16)
         
         # Dashboard colors
         self.colors = {
@@ -29,24 +33,8 @@ class RightStatsPanel:
             State.VACCINATED: (200, 100, 255)
         }
         
-        # Minimap settings - REMOVED
-        # self.minimap_size = 280
-        # self.world_width = 2000
-        # self.world_height = 2000
-        # self.world_origin = (0, 0)
-        # self._update_minimap_scale()
-        # self.minimap_dragging = False
-
-    # def _update_minimap_scale(self):
-    #     self.scale_x = self.minimap_size / self.world_width
-    #     self.scale_y = self.minimap_size / self.world_height
-
     def set_world_bounds(self, min_x, min_y, max_x, max_y):
         pass
-        # self.world_origin = (min_x, min_y)
-        # self.world_width = max(1, max_x - min_x)
-        # self.world_height = max(1, max_y - min_y)
-        # self._update_minimap_scale()
 
     def update(self, mouse_pos):
         # Hover detection - show panel when mouse near right edge OR over the panel
@@ -106,13 +94,20 @@ class RightStatsPanel:
         # else:
         #   target_x = screen_width (Hidden)
         
-        if distance_from_right < self.hover_zone_width or (mouse_pos[0] > self.offset_x):
+        if self.pinned:
+            self.target_x = self.screen_width - self.width
+        elif distance_from_right < self.hover_zone_width or (mouse_pos[0] > self.offset_x):
             self.target_x = self.screen_width - self.width
         else:
             self.target_x = self.screen_width
         
-        # Smooth animation
-        self.offset_x += (self.target_x - self.offset_x) * self.speed_anim
+        # Damped spring animation for a softer overshoot
+        delta = self.target_x - self.offset_x
+        self.velocity = self.velocity * 0.7 + delta * self.speed_anim
+        self.offset_x += self.velocity
+        if abs(delta) < 0.5 and abs(self.velocity) < 0.4:
+            self.offset_x = self.target_x
+            self.velocity = 0.0
         
         # Clamp offset_x
         if self.offset_x < self.screen_width - self.width:
@@ -122,45 +117,14 @@ class RightStatsPanel:
             
         self.x = self.offset_x
         self.rect.x = self.x
+        self.pin_rect.x = self.offset_x + 12
 
     def handle_event(self, event, camera):
-        # Handle minimap dragging - REMOVED
-        # minimap_x = self.x + 20
-        # minimap_y = self.height - self.minimap_size - 20
-        # minimap_rect = pygame.Rect(minimap_x, minimap_y, self.minimap_size, self.minimap_size)
-        
-        # if event.type == pygame.MOUSEBUTTONDOWN:
-        #     if minimap_rect.collidepoint(event.pos):
-        #         self.minimap_dragging = True
-        #         self._move_camera_to_click(event.pos, camera, minimap_x, minimap_y)
-        #         return True
-        # elif event.type == pygame.MOUSEBUTTONUP:
-        #     self.minimap_dragging = False
-        # elif event.type == pygame.MOUSEMOTION:
-        #     if self.minimap_dragging:
-        #         self._move_camera_to_click(event.pos, camera, minimap_x, minimap_y)
-        #         return True
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.pin_rect.collidepoint(event.pos):
+                self.pinned = not self.pinned
+                return True
         return False
-
-    # def _move_camera_to_click(self, pos, camera, minimap_x, minimap_y):
-    #     # Convert screen pos to minimap local
-    #     mx = pos[0] - minimap_x
-    #     my = pos[1] - minimap_y
-    #     
-    #     # Clamp
-    #     mx = max(0, min(self.minimap_size, mx))
-    #     my = max(0, min(self.minimap_size, my))
-    #     
-    #     # Convert to world coordinates
-    #     wx = mx / self.scale_x
-    #     wy = my / self.scale_y
-    #     ox, oy = self.world_origin
-    #     wx += ox
-    #     wy += oy
-    #     
-    #     # Set camera center
-    #     camera.x = wx
-    #     camera.y = wy
 
     def render(self, screen, stats_manager, cities, camera, trace_points=None):
         # Panel background
@@ -174,13 +138,22 @@ class RightStatsPanel:
         # Render dashboard (graph)
         self._render_dashboard(screen, stats_manager, cities)
         
-        # Render minimap - REMOVED
-        # self._render_minimap(screen, cities, camera, trace_points)
-        
         # Edge indicator (shows when panel is hidden)
         if self.offset_x > self.screen_width - 5:
             indicator_rect = pygame.Rect(self.screen_width - 3, self.height // 2 - 30, 3, 60)
             pygame.draw.rect(screen, UITheme.ACCENT_COLOR, indicator_rect, border_radius=2)
+
+        # Pin toggle
+        pin_hover = self.pin_rect.collidepoint(pygame.mouse.get_pos())
+        pin_bg = pygame.Color(40, 40, 50, 220)
+        pygame.draw.rect(screen, pin_bg, self.pin_rect, border_radius=4)
+        pygame.draw.rect(screen, UITheme.ACCENT_COLOR if (self.pinned or pin_hover) else (120, 120, 130), self.pin_rect, 2, border_radius=4)
+        cx = self.pin_rect.centerx
+        cy = self.pin_rect.centery
+        pygame.draw.line(screen, (220, 220, 230), (cx, cy - 4), (cx, cy + 4), 2)
+        pygame.draw.line(screen, (220, 220, 230), (cx - 4, cy), (cx + 4, cy), 2)
+        if self.pinned:
+            pygame.draw.circle(screen, UITheme.ACCENT_COLOR, (cx, cy), 3)
 
     def _render_dashboard(self, screen, stats_manager, cities):
         graph_y = 70
@@ -295,86 +268,3 @@ class RightStatsPanel:
         commuters_surf = info_font.render(commuters_txt, True, (180, 200, 255))
         screen.blit(commuters_surf, (self.x + 20, stats_y))
         stats_y += 25
-
-    def _render_minimap(self, screen, cities, camera, trace_points):
-        pass
-        # minimap_x = self.x + 20
-        # minimap_y = self.height - self.minimap_size - 20
-        # minimap_rect = pygame.Rect(minimap_x, minimap_y, self.minimap_size, self.minimap_size)
-        
-        # # Section label
-        # label_font = UITheme.get_font(12, bold=True)
-        # label = label_font.render("MINIMAP", True, (150, 150, 160))
-        # screen.blit(label, (minimap_x, minimap_y - 25))
-        
-        # # Background
-        # s = pygame.Surface((self.minimap_size, self.minimap_size), pygame.SRCALPHA)
-        # s.fill((20, 20, 30, 200))
-        # screen.blit(s, (minimap_x, minimap_y))
-        # pygame.draw.rect(screen, (80, 80, 100), minimap_rect, 1, border_radius=5)
-        
-        # ox, oy = self.world_origin
-        
-        # # Draw cities and districts
-        # for city in cities:
-        #     # City center
-        #     cx = minimap_x + (city.location[0] - ox) * self.scale_x
-        #     cy = minimap_y + (city.location[1] - oy) * self.scale_y
-        #     pygame.draw.circle(screen, (200, 200, 200), (int(cx), int(cy)), 4)
-            
-        #     # Districts
-        #     for district in city.districts:
-        #         r = district.bounds
-        #         dx = minimap_x + (r.x - ox) * self.scale_x
-        #         dy = minimap_y + (r.y - oy) * self.scale_y
-        #         dw = r.width * self.scale_x
-        #         dh = r.height * self.scale_y
-                
-        #         # Color by infection rate
-        #         color = (80, 80, 100)
-        #         if len(district.people) > 0:
-        #             infected = sum(1 for p in district.people if p.state.name == 'INFECTIOUS')
-        #             if infected > 0:
-        #                 ratio = infected / len(district.people)
-        #                 color = (80 + int(175 * ratio), 80 - int(80 * ratio), 80 - int(80 * ratio))
-                
-        #         pygame.draw.rect(screen, color, (dx, dy, dw, dh))
-        
-        # # Draw trace trail if available
-        # if trace_points and len(trace_points) > 1:
-        #     pts = []
-        #     for pair in trace_points:
-        #         try:
-        #             wx, wy = float(pair[0]), float(pair[1])
-        #             mx = minimap_x + (wx - ox) * self.scale_x
-        #             my = minimap_y + (wy - oy) * self.scale_y
-        #             pts.append((float(mx), float(my)))
-        #         except (TypeError, ValueError, AttributeError):
-        #             continue
-            
-        #     if len(pts) > 1:
-        #         try:
-        #             pygame.draw.lines(screen, (0, 255, 255), False, pts, 2)
-        #         except (TypeError, ValueError):
-        #             pass
-        
-        # # Draw camera viewport
-        # screen_w = camera.width
-        # screen_h = camera.height
-        # zoom = camera.zoom
-        
-        # vx_world = camera.x - (screen_w / 2) / zoom
-        # vy_world = camera.y - (screen_h / 2) / zoom
-        # vw_world = screen_w / zoom
-        # vh_world = screen_h / zoom
-        
-        # vx = (vx_world - ox) * self.scale_x
-        # vy = (vy_world - oy) * self.scale_y
-        # vw = vw_world * self.scale_x
-        # vh = vh_world * self.scale_y
-        
-        # view_rect = pygame.Rect(minimap_x + vx, minimap_y + vy, vw, vh)
-        # clip_rect = minimap_rect.clip(view_rect)
-        
-        # if clip_rect.width > 0 and clip_rect.height > 0:
-        #     pygame.draw.rect(screen, (255, 255, 255), clip_rect, 2)

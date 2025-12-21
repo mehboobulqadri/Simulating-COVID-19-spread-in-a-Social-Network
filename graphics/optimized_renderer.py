@@ -2,7 +2,7 @@ import pygame
 import pygame.gfxdraw
 import numpy as np
 from entities.person import State
-from entities.building import BuildingType
+from entities.building import BuildingType, Building
 
 class OptimizedRenderer:
     def __init__(self, screen, camera):
@@ -59,6 +59,26 @@ class OptimizedRenderer:
         
         # Store state colors for legend rendering
         self.state_colors = states
+        
+        # Building type colors and symbols
+        self.building_colors = {
+            BuildingType.RESIDENTIAL: (100, 200, 100),
+            BuildingType.WORKPLACE: (100, 100, 200),
+            BuildingType.HOSPITAL: (255, 255, 255),
+            BuildingType.COMMERCIAL: (240, 180, 60),
+            BuildingType.SCHOOL: (220, 120, 120),
+            BuildingType.PARK: (50, 160, 80)
+        }
+        
+        self.building_symbols = {
+            BuildingType.RESIDENTIAL: '□',
+            BuildingType.WORKPLACE: '▲',
+            BuildingType.HOSPITAL: '✚',
+            BuildingType.COMMERCIAL: '$',
+            BuildingType.SCHOOL: '◆',
+            BuildingType.PARK: '♣'
+        }
+        
         # Trace highlight surface
         trace = pygame.Surface((14, 14), pygame.SRCALPHA)
         pygame.draw.circle(trace, (0, 240, 255), (7, 7), 6)
@@ -80,6 +100,23 @@ class OptimizedRenderer:
                 # Inner core
                 pygame.draw.circle(g, (255, 200, 200), (8, 8), 3)
                 self.person_surfs['glow'] = g
+        
+        # Create white surface for asymptomatic carriers
+        asymptomatic = pygame.Surface((8, 8), pygame.SRCALPHA)
+        pygame.draw.circle(asymptomatic, (255, 255, 255), (4, 4), 3)
+        self.person_surfs['asymptomatic'] = asymptomatic
+
+        # Variant outline overlays (drawn under infectious agents)
+        self.variant_colors = {
+            "base": (255, 140, 80),
+            "high-transmission": (255, 90, 190),
+            "high-mortality": (200, 70, 70),
+        }
+        self.variant_outline_surfs = {}
+        for name, color in self.variant_colors.items():
+            s = pygame.Surface((18, 18), pygame.SRCALPHA)
+            pygame.draw.circle(s, (*color, 120), (9, 9), 8, 2)
+            self.variant_outline_surfs[name] = s
 
     def set_world_data(self, cities):
         self.cities = cities
@@ -104,13 +141,13 @@ class OptimizedRenderer:
                     width = max(1, int(road.width * zoom))
                     pygame.draw.line(self.screen, (40, 40, 45), start, end, width)
             
-            # Draw Inter-City Highways
+            # Draw Inter-City Highways with dashed pattern
             if hasattr(city, 'highways'):
                 for road in city.highways:
                     start = self.camera.apply(*road.start)
                     end = self.camera.apply(*road.end)
                     width = max(2, int(road.width * zoom))
-                    pygame.draw.line(self.screen, (80, 80, 50), start, end, width)
+                    self._draw_dashed_line(start, end, (120, 120, 70), width, dash_length=8)
 
             # Draw Districts
             for district in city.districts:
@@ -124,6 +161,15 @@ class OptimizedRenderer:
                 # Draw District Floor
                 pygame.draw.rect(self.screen, (30, 30, 35), screen_rect)
                 
+                # Quarantine glow for quarantined districts
+                if hasattr(district, 'is_quarantined') and district.is_quarantined:
+                    # Yellow glow overlay
+                    glow_surf = pygame.Surface(screen_rect.size, pygame.SRCALPHA)
+                    glow_surf.fill((255, 200, 0, 60))  # Yellow with transparency
+                    self.screen.blit(glow_surf, screen_rect.topleft)
+                    # Yellow border
+                    pygame.draw.rect(self.screen, (255, 200, 0), screen_rect, 3)
+                
                 # Highlight if hovered
                 if self.interaction and self.interaction.hovered_entity == district:
                     pygame.draw.rect(self.screen, (60, 60, 80), screen_rect, 2)
@@ -136,22 +182,46 @@ class OptimizedRenderer:
                         b_rect = self._world_to_screen_rect(b.bounds)
                         color = b.color
                         pygame.draw.rect(self.screen, color, b_rect)
-                        # Roof detail
-                        pygame.draw.rect(self.screen, (color[0]*0.8, color[1]*0.8, color[2]*0.8), b_rect.inflate(-4, -4))
+                        # Roof detail with darker shade
+                        pygame.draw.rect(self.screen, (int(color[0]*0.7), int(color[1]*0.7), int(color[2]*0.7)), b_rect.inflate(-4, -4))
+                        
+                        # Quarantine glow for quarantined buildings
+                        if hasattr(b, 'is_quarantined') and b.is_quarantined:
+                            # Yellow border for quarantined building
+                            pygame.draw.rect(self.screen, (255, 200, 0), b_rect, 2)
+                        
+                        # Draw building type symbol/label if building is large enough
+                        if b_rect.width > 20 and b_rect.height > 20:
+                            symbol = self.building_symbols.get(b.type, '□')
+                            sym_font = pygame.font.SysFont("Arial", 10, bold=True)
+                            sym_surf = sym_font.render(symbol, True, (255, 255, 255))
+                            sym_rect = sym_surf.get_rect(center=(int(b_rect.centerx), int(b_rect.centery)))
+                            self.screen.blit(sym_surf, sym_rect)
                 
-                # Draw People
-                if zoom > 0.8:
+                # Draw People (visible at lower zoom levels now)
+                if zoom > 0.3:  # Changed from 0.8 to 0.3 for better visibility when zoomed out
                     # Optimization: Batch blits
                     blits = []
                     
                     for p in district.people:
                         px, py = self.camera.apply(p.x, p.y)
+
+                        # Variant outline (drawn under the agent) for infectious cases
+                        if p.state == State.INFECTIOUS:
+                            variant_name = getattr(p, 'variant', 'base')
+                            outline = self.variant_outline_surfs.get(variant_name)
+                            if outline:
+                                blits.append((outline, (px - 9, py - 9)))
                         
                         if self.interaction and getattr(self.interaction, 'tracing_enabled', True) and getattr(self.interaction, 'selected_entity', None) is p:
                             blits.append((self.trace_surf, (px - 7, py - 7)))
                         
+                        # Asymptomatic carriers appear as white (distinct from healthy)
+                        if hasattr(p, 'is_asymptomatic') and p.is_asymptomatic and p.state == State.INFECTIOUS:
+                            surf = self.person_surfs['asymptomatic']
+                            offset = 4
                         # Check vaccination status first (takes priority over base state)
-                        if hasattr(p, 'is_vaccinated') and p.is_vaccinated:
+                        elif hasattr(p, 'is_vaccinated') and p.is_vaccinated:
                             surf = self.person_surfs[State.VACCINATED]
                             offset = 4
                         elif p.state == State.INFECTIOUS:
@@ -197,6 +267,30 @@ class OptimizedRenderer:
                 overlay.fill((0, 200, 255, 60))
                 self.screen.blit(overlay, rect.topleft)
                 pygame.draw.rect(self.screen, (0, 240, 255), rect, 2)
+
+    def _draw_dashed_line(self, start, end, color, width, dash_length=8):
+        """Draw a dashed line from start to end."""
+        x1, y1 = start
+        x2, y2 = end
+        dx = x2 - x1
+        dy = y2 - y1
+        distance = (dx**2 + dy**2)**0.5
+        
+        if distance == 0:
+            return
+        
+        # Normalize direction
+        dx /= distance
+        dy /= distance
+        
+        # Draw dashes
+        current_pos = 0
+        while current_pos < distance:
+            dash_end = min(current_pos + dash_length, distance)
+            line_start = (x1 + dx * current_pos, y1 + dy * current_pos)
+            line_end = (x1 + dx * dash_end, y1 + dy * dash_end)
+            pygame.draw.line(self.screen, color, line_start, line_end, width)
+            current_pos += dash_length * 2  # Skip equal length gap
 
     def _render_legend(self):
         pass

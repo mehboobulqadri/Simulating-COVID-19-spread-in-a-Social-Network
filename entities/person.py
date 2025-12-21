@@ -37,6 +37,12 @@ class Person(Entity):
         self.vaccination_efficacy = 0.0  # Current efficacy 0-100%
         self.days_since_vaccination = 0  # Tracks efficacy decay
         
+        # Asymptomatic carrier status
+        self.is_asymptomatic = False
+
+        # Variant tag for infection lineage/visuals
+        self.variant = "base"
+        
     def update(self, time_engine=None):
         if self.state == State.DECEASED:
             return

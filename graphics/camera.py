@@ -9,8 +9,13 @@ class Camera:
         self.y = 0
         self.zoom = 1.0
         self.target_zoom = 1.0
+        self.target_x = 0
+        self.target_y = 0
         self.pan_speed = 5
         self.zoom_speed = 0.1
+        self.min_zoom = 0.08
+        self.max_zoom = 6.0
+        self.smoothing = 0.15  # Smoothing factor for pan/zoom (0-1, higher = snappier)
         
         # Drag state
         self.is_dragging = False
@@ -50,21 +55,43 @@ class Camera:
 
     def handle_input(self):
         keys = pygame.key.get_pressed()
+        pan_delta = self.pan_speed / self.zoom
+        
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-            self.x -= self.pan_speed / self.zoom
+            self.target_x -= pan_delta
+            self.x -= pan_delta
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-            self.x += self.pan_speed / self.zoom
+            self.target_x += pan_delta
+            self.x += pan_delta
         if keys[pygame.K_UP] or keys[pygame.K_w]:
-            self.y -= self.pan_speed / self.zoom
+            self.target_y -= pan_delta
+            self.y -= pan_delta
         if keys[pygame.K_DOWN] or keys[pygame.K_s]:
-            self.y += self.pan_speed / self.zoom
+            self.target_y += pan_delta
+            self.y += pan_delta
             
     def handle_event(self, event):
         if event.type == pygame.MOUSEWHEEL:
             if event.y > 0:
-                self.zoom *= 1.1
+                self.target_zoom *= 1.1
             elif event.y < 0:
-                self.zoom /= 1.1
+                self.target_zoom /= 1.1
+            # Clamp zoom
+            if self.target_zoom < self.min_zoom:
+                self.target_zoom = self.min_zoom
+            elif self.target_zoom > self.max_zoom:
+                self.target_zoom = self.max_zoom
+
+        # Legacy wheel mapping on some systems (buttons 4/5)
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 4:  # wheel up
+                self.target_zoom *= 1.1
+                if self.target_zoom > self.max_zoom:
+                    self.target_zoom = self.max_zoom
+            elif event.button == 5:  # wheel down
+                self.target_zoom /= 1.1
+                if self.target_zoom < self.min_zoom:
+                    self.target_zoom = self.min_zoom
         
         elif event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 1: # Left click
@@ -80,21 +107,53 @@ class Camera:
                 dx = event.pos[0] - self.last_mouse_pos[0]
                 dy = event.pos[1] - self.last_mouse_pos[1]
                 
-                # Adjust camera position (inverse of mouse movement)
-                self.x -= dx / self.zoom
-                self.y -= dy / self.zoom
+                # Adjust camera position immediately (inverse of mouse movement)
+                # Update both current AND target to avoid smooth interpolation fighting the drag
+                pan_x = dx / self.zoom
+                pan_y = dy / self.zoom
+                
+                self.x -= pan_x
+                self.y -= pan_y
+                self.target_x -= pan_x
+                self.target_y -= pan_y
                 
                 self.last_mouse_pos = event.pos
         
     def update(self):
-        # Smooth zoom interpolation could go here
-        pass
+        # Smooth zoom interpolation only
+        zoom_diff = self.target_zoom - self.zoom
+        if abs(zoom_diff) > 0.001:
+            self.zoom += zoom_diff * self.smoothing
+        else:
+            self.zoom = self.target_zoom
+        
+        # NO pan interpolation - camera position is set directly by input
+        # This prevents drift back to center
+        
+        # Keyboard zoom fallback (for users with trackpads/wheel issues)
+        keys = pygame.key.get_pressed()
+        # '[' to zoom out, ']' to zoom in
+        if keys[pygame.K_LEFTBRACKET]:
+            self.target_zoom /= (1.0 + self.zoom_speed)
+        if keys[pygame.K_RIGHTBRACKET]:
+            self.target_zoom *= (1.0 + self.zoom_speed)
+        # Clamp zoom
+        if self.target_zoom < self.min_zoom:
+            self.target_zoom = self.min_zoom
+        elif self.target_zoom > self.max_zoom:
+            self.target_zoom = self.max_zoom
         
     def apply(self, x, y):
         # Convert world coordinates to screen coordinates
         screen_x = (x - self.x) * self.zoom + self.width / 2
         screen_y = (y - self.y) * self.zoom + self.height / 2
         return int(screen_x), int(screen_y)
+    
+    def screen_to_world(self, screen_x, screen_y):
+        # Convert screen coordinates to world coordinates
+        world_x = (screen_x - self.width / 2) / self.zoom + self.x
+        world_y = (screen_y - self.height / 2) / self.zoom + self.y
+        return world_x, world_y
 
     def frame_bounds(self, min_x, min_y, max_x, max_y, padding=200):
         """Center and zoom camera to fit given world bounds."""
@@ -104,8 +163,10 @@ class Camera:
             return
         w_p = w + 2 * padding
         h_p = h + 2 * padding
-        zoom_x = self.width / w_p
-        zoom_y = self.height / h_p
-        self.zoom = min(zoom_x, zoom_y)
-        self.x = (min_x + max_x) / 2
-        self.y = (min_y + max_y) / 2
+        self.target_zoom = min(self.width / w_p, self.height / h_p)
+        self.target_x = (min_x + max_x) / 2
+        self.target_y = (min_y + max_y) / 2
+        # Snap to target immediately for initial framing
+        self.x = self.target_x
+        self.y = self.target_y
+        self.zoom = self.target_zoom

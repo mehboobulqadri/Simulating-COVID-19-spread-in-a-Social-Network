@@ -10,6 +10,7 @@ class District(GraphNode):
         self.quadtree = QuadTree(bounds, capacity)
         self.people = []
         self.buildings = []
+        self.is_quarantined = False  # Track if district is quarantined
         
     def add_building(self, building):
         self.buildings.append(building)

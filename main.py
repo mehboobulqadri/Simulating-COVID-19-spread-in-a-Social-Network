@@ -34,13 +34,13 @@ class BioSpatialApp:
         self.width = info.current_w
         self.height = info.current_h
         
-        # Initialize Window - Start in Fullscreen to ensure it fits
-        self.screen = pygame.display.set_mode((self.width, self.height), pygame.FULLSCREEN | pygame.DOUBLEBUF)
+        # Initialize Window - start windowed and resizable for flexibility
+        self.screen = pygame.display.set_mode((self.width, self.height), pygame.DOUBLEBUF | pygame.RESIZABLE)
         pygame.display.set_caption("Bio-Spatial Epidemic Simulator")
         
         self.clock = pygame.time.Clock()
         self.running = True
-        self.is_fullscreen = True
+        self.is_fullscreen = False
         self.show_fps = True
         
         self.camera = Camera(self.width, self.height)
@@ -48,6 +48,12 @@ class BioSpatialApp:
         # UI Surface for 2D overlay
         self.ui_surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
         
+        # Ensure wheel events are delivered (trackpad/scroll)
+        try:
+            pygame.event.set_allowed([pygame.MOUSEWHEEL, pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP, pygame.MOUSEMOTION, pygame.KEYDOWN, pygame.QUIT, pygame.VIDEORESIZE])
+        except Exception:
+            pass
+
         # Initialize Core Systems
         self.time_engine = TimeEngine()
         self.cities = WorldGenerator.generate_world(num_cities=5)
@@ -137,8 +143,8 @@ class BioSpatialApp:
             if dist_sq < radius ** 2:
                 # Only infect susceptible agents
                 if self.simulation_engine.state[idx] == State.SUSCEPTIBLE.value:
-                    self.simulation_engine.state[idx] = State.EXPOSED.value
-                    self.simulation_engine.timer[idx] = 100
+                    variant_idx = int(self.simulation_engine.active_variant)
+                    self.simulation_engine._apply_exposure(idx, variant_idx)
                     infected_count += 1
                     self.visual_effects.add_infection_effect(agent_x, agent_y)
         
@@ -270,6 +276,18 @@ class BioSpatialApp:
                         self.camera.frame_bounds(min_x, min_y, max_x, max_y)
                 elif event.key == pygame.K_g:
                     self.toggle_god_mode()
+                elif event.key == pygame.K_l and not (event.mod & pygame.KMOD_CTRL):
+                    # L key for Lockdown (unless Ctrl+L for Load)
+                    self.simulation_engine.toggle_lockdown()
+                elif event.key == pygame.K_q and not (event.mod & pygame.KMOD_CTRL):
+                    # Q key for Quarantine
+                    self.simulation_engine.toggle_quarantine()
+                elif event.key == pygame.K_r and not (event.mod & pygame.KMOD_CTRL):
+                    # R key for Quarantine selection (Right-click areas)
+                    self.interaction.toggle_quarantine_selection()
+                elif event.key == pygame.K_v:
+                    # Cycle active variant for new infections
+                    self.simulation_engine.cycle_variant()
                 elif event.key == pygame.K_F11:
                     self.toggle_fullscreen()
                 elif event.key == pygame.K_SPACE:
@@ -308,6 +326,33 @@ class BioSpatialApp:
                 
                 if event.button == 1 and self.interaction.box_select_active:
                     self.interaction.start_box(mouse_pos)
+                elif event.button == 1 and self.interaction.quarantine_selection_mode:
+                    # Quarantine selection mode - click to toggle district/building quarantine
+                    world_pos = self.camera.screen_to_world(*mouse_pos)
+                    for city in self.cities:
+                        for district in city.districts:
+                            if district.bounds.collidepoint(world_pos):
+                                # Toggle quarantine for district
+                                district.is_quarantined = not district.is_quarantined
+                                if district.is_quarantined:
+                                    self.interaction.quarantined_districts.add(district)
+                                    print(f"🏥 Quarantined: {district.name}")
+                                else:
+                                    self.interaction.quarantined_districts.discard(district)
+                                    print(f"✅ Released: {district.name}")
+                                break
+                            
+                            # Check buildings
+                            for building in district.buildings:
+                                if building.bounds.collidepoint(world_pos):
+                                    building.is_quarantined = not building.is_quarantined
+                                    if building.is_quarantined:
+                                        self.interaction.quarantined_buildings.add(building)
+                                        print(f"🏥 Quarantined: {building.type.name} building")
+                                    else:
+                                        self.interaction.quarantined_buildings.discard(building)
+                                        print(f"✅ Released: {building.type.name} building")
+                                    break
                 elif event.button == 1 and (pygame.key.get_mods() & pygame.KMOD_SHIFT):
                     world_pos = self.camera.screen_to_world(*mouse_pos)
                     self._infect_at_point(world_pos, self.infect_radius)
@@ -372,6 +417,7 @@ class BioSpatialApp:
             return True
         
         return False
+
 
     def update(self):
         dt = self.clock.get_time() / 1000.0
@@ -438,16 +484,64 @@ class BioSpatialApp:
         
         # Tracing status
         if self.interaction.tracing_enabled and self.interaction.selected_entity:
-            state_name = getattr(getattr(self.interaction.selected_entity, 'state', None), 'name', 'Unknown')
-            trace_txt = f"Tracing: {getattr(self.interaction.selected_entity, 'uid', 'unknown')} ({state_name})"
+            selected = self.interaction.selected_entity
+            state = getattr(selected, 'state', None)
+            state_name = getattr(state, 'name', 'Unknown')
+            # Clarify infectious state with symptom visibility
+            if state == State.INFECTIOUS:
+                if getattr(selected, 'is_asymptomatic', False):
+                    state_name = "INFECTIOUS (ASYMPTOMATIC)"
+                else:
+                    state_name = "INFECTIOUS (SYMPTOMATIC)"
+            variant = getattr(selected, 'variant', 'base')
+            trace_txt = f"Tracing: {getattr(selected, 'uid', 'unknown')} ({state_name}, variant: {variant})"
             trace_surf = self.font_main.render(trace_txt, True, (0, 240, 255))
             self.ui_surface.blit(trace_surf, (self.width // 2 - 150, 70))
         
+        # Lockdown status indicator
+        if self.simulation_engine.lockdown_active:
+            lockdown_font = pygame.font.SysFont("Arial", 18, bold=True)
+            lockdown_txt = "🔒 LOCKDOWN ACTIVE"
+            lockdown_surf = lockdown_font.render(lockdown_txt, True, (255, 100, 100))
+            lockdown_rect = lockdown_surf.get_rect(center=(self.width // 2, 70))
+            # Background for visibility
+            bg_rect = lockdown_rect.inflate(20, 10)
+            pygame.draw.rect(self.ui_surface, (40, 0, 0, 200), bg_rect, border_radius=5)
+            pygame.draw.rect(self.ui_surface, (255, 100, 100), bg_rect, 2, border_radius=5)
+            self.ui_surface.blit(lockdown_surf, lockdown_rect)
+        
+        # Quarantine status indicator
+        if self.simulation_engine.quarantine_active:
+            quarantine_font = pygame.font.SysFont("Arial", 18, bold=True)
+            quarantine_txt = "🏥 QUARANTINE ACTIVE"
+            quarantine_surf = quarantine_font.render(quarantine_txt, True, (100, 200, 255))
+            # Position below lockdown if both active, otherwise at top
+            y_pos = 100 if self.simulation_engine.lockdown_active else 70
+            quarantine_rect = quarantine_surf.get_rect(center=(self.width // 2, y_pos))
+            # Background for visibility
+            bg_rect = quarantine_rect.inflate(20, 10)
+            pygame.draw.rect(self.ui_surface, (0, 20, 40, 200), bg_rect, border_radius=5)
+            pygame.draw.rect(self.ui_surface, (100, 200, 255), bg_rect, 2, border_radius=5)
+            self.ui_surface.blit(quarantine_surf, quarantine_rect)
+        
+        # Quarantine selection mode indicator
+        if self.interaction.quarantine_selection_mode:
+            qsel_font = pygame.font.SysFont("Arial", 16, bold=True)
+            qsel_txt = "🎯 CLICK TO QUARANTINE AREAS"
+            qsel_surf = qsel_font.render(qsel_txt, True, (255, 200, 0))
+            y_pos = 130 if (self.simulation_engine.lockdown_active or self.simulation_engine.quarantine_active) else 70
+            qsel_rect = qsel_surf.get_rect(center=(self.width // 2, y_pos))
+            # Background for visibility
+            bg_rect = qsel_rect.inflate(20, 10)
+            pygame.draw.rect(self.ui_surface, (60, 40, 0, 200), bg_rect, border_radius=5)
+            pygame.draw.rect(self.ui_surface, (255, 200, 0), bg_rect, 2, border_radius=5)
+            self.ui_surface.blit(qsel_surf, qsel_rect)
+
         # Keyboard shortcuts help (bottom center)
         help_font = pygame.font.SysFont("Arial", 14)
         shortcuts = [
-            "SPACE: Pause/Play | 1/2/5: Speed | T: Trace Person | F: Frame View",
-            "SHIFT+Click: Infect Area | H: Toggle FPS | Ctrl+S: Save | Ctrl+L: Load"
+            "SPACE: Pause/Play | 1/2/5: Speed | T: Trace | F: Frame | L: Lockdown | Q: Quarantine",
+            "R: Quarantine Select | SHIFT+Click: Infect | H: FPS | Ctrl+S: Save | Ctrl+L: Load"
         ]
         y_offset = self.height - 50
         for text in shortcuts:
@@ -477,7 +571,7 @@ class BioSpatialApp:
         
         # Pass trace points to stats panel for minimap visualization
         trace_points = self.interaction.trace_points if (self.interaction.tracing_enabled and self.interaction.trace_points) else None
-
+        
         # Render Minimap
         self.minimap.render(self.screen, self.cities, self.camera, trace_points)
 

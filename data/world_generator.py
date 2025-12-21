@@ -17,6 +17,20 @@ class Road:
 
 class WorldGenerator:
     @staticmethod
+    def _nearest_building(origin, buildings):
+        if not buildings:
+            return None
+        ox, oy = origin
+        best = None
+        best_d2 = float('inf')
+        for b in buildings:
+            cx, cy = b.bounds.centerx, b.bounds.centery
+            d2 = (cx - ox) ** 2 + (cy - oy) ** 2
+            if d2 < best_d2:
+                best_d2 = d2
+                best = b
+        return best
+    @staticmethod
     def generate_social_networks(cities):
         """Generate Watts-Strogatz small-world networks for each city"""
         print("Generating social networks...")
@@ -207,24 +221,57 @@ class WorldGenerator:
                     cols = int(bounds.width / lot_size)
                     rows = int(bounds.height / lot_size)
                     
+                    # Ensure city registries exist
+                    if not hasattr(city, 'workplaces'):
+                        city.workplaces = []
+                    if not hasattr(city, 'commercials'):
+                        city.commercials = []
+                    if not hasattr(city, 'schools'):
+                        city.schools = []
+                    if not hasattr(city, 'parks'):
+                        city.parks = []
+
                     for r in range(rows):
                         for c in range(cols):
-                            if random.random() < 0.7: # 70% density
+                            if random.random() < 0.7:  # 70% density
                                 lx = bounds.x + c * lot_size + 5
                                 ly = bounds.y + r * lot_size + 5
                                 lw = lot_size - 10
                                 lh = lot_size - 10
-                                
+
                                 b_type = BuildingType.RESIDENTIAL
                                 if is_center:
-                                    if random.random() < 0.3:
+                                    roll = random.random()
+                                    if roll < 0.2:
                                         b_type = BuildingType.HOSPITAL
-                                        city.hospitals.append(Building(lx, ly, lw, lh, b_type))
-                                    else:
+                                    elif roll < 0.6:
                                         b_type = BuildingType.WORKPLACE
-                                
+                                    else:
+                                        b_type = BuildingType.COMMERCIAL
+                                else:
+                                    roll = random.random()
+                                    if roll < 0.7:
+                                        b_type = BuildingType.RESIDENTIAL
+                                    elif roll < 0.8:
+                                        b_type = BuildingType.SCHOOL
+                                    elif roll < 0.9:
+                                        b_type = BuildingType.PARK
+                                    else:
+                                        b_type = BuildingType.COMMERCIAL
+
                                 building = Building(lx, ly, lw, lh, b_type)
                                 district.add_building(building)
+                                # Register special buildings
+                                if b_type == BuildingType.HOSPITAL:
+                                    city.hospitals.append(building)
+                                elif b_type == BuildingType.WORKPLACE:
+                                    city.workplaces.append(building)
+                                elif b_type == BuildingType.COMMERCIAL:
+                                    city.commercials.append(building)
+                                elif b_type == BuildingType.SCHOOL:
+                                    city.schools.append(building)
+                                elif b_type == BuildingType.PARK:
+                                    city.parks.append(building)
                     
                     # Add People
                     pop = random.randint(20, 50)
@@ -232,6 +279,28 @@ class WorldGenerator:
                         px = random.randint(bounds.left, bounds.right)
                         py = random.randint(bounds.top, bounds.bottom)
                         person = Person(f"p_{i}_{district_idx}_{k}", px, py, district)
+                        # Student assignment
+                        person.is_student = 6 <= getattr(person, 'age', 0) <= 18
+                        # School location (nearest available)
+                        if person.is_student:
+                            school_b = WorldGenerator._nearest_building(person.home_location, getattr(city, 'schools', []))
+                            if not school_b:
+                                # Fallback to workplace/hospital if no schools generated
+                                school_b = WorldGenerator._nearest_building(person.home_location, getattr(city, 'workplaces', [])) or WorldGenerator._nearest_building(person.home_location, getattr(city, 'hospitals', []))
+                            person.school_location = (school_b.bounds.centerx, school_b.bounds.centery) if school_b else person.home_location
+                        else:
+                            person.school_location = None
+
+                        # Lunch spot (nearest commercial)
+                        lunch_b = WorldGenerator._nearest_building(person.home_location, getattr(city, 'commercials', []))
+                        person.lunch_location = (lunch_b.bounds.centerx, lunch_b.bounds.centery) if lunch_b else None
+
+                        # Leisure spot (nearest park or commercial)
+                        leisure_b = WorldGenerator._nearest_building(person.home_location, getattr(city, 'parks', []))
+                        if not leisure_b:
+                            leisure_b = WorldGenerator._nearest_building(person.home_location, getattr(city, 'commercials', []))
+                        person.leisure_location = (leisure_b.bounds.centerx, leisure_b.bounds.centery) if leisure_b else None
+
                         district.add_person(person)
                         
                     city.add_district(district)
