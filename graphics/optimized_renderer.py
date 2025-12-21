@@ -176,12 +176,12 @@ class OptimizedRenderer:
         if self.visual_effects and not min_detail:
             self.visual_effects.render(self.screen, self.camera)
         
-        # Render Legend (skip at minimal detail)
-        if not min_detail:
-            self._render_legend()
+        # Render Legend (skip at minimal detail) - REMOVED (Moved to RightStatsPanel)
+        # if not min_detail:
+        #     self._render_legend()
         
-        # Render HUD (always render; shows FPS)
-        self._render_hud()
+        # Render HUD (always render; shows FPS) - REMOVED (Moved to RightStatsPanel)
+        # self._render_hud()
             
         # Render Hover Info (skip at minimal detail)
         if self.interaction and not min_detail:
@@ -199,81 +199,83 @@ class OptimizedRenderer:
                 pygame.draw.rect(self.screen, (0, 240, 255), rect, 2)
 
     def _render_legend(self):
-        """Draw state legend in top-left corner"""
-        legend_x = 15
-        legend_y = 15
-        box_w = 160
-        row_h = 24
-        padding = 10
+        pass
+        # """Draw state legend in top-left corner"""
+        # legend_x = 15
+        # legend_y = 15
+        # box_w = 160
+        # row_h = 24
+        # padding = 10
         
-        legend_items = [
-            (State.SUSCEPTIBLE, "Healthy"),
-            (State.EXPOSED, "Exposed"),
-            (State.INFECTIOUS, "Infected"),
-            (State.RECOVERED, "Recovered"),
-            (State.VACCINATED, "Vaccinated")
-        ]
+        # legend_items = [
+        #     (State.SUSCEPTIBLE, "Healthy"),
+        #     (State.EXPOSED, "Exposed"),
+        #     (State.INFECTIOUS, "Infected"),
+        #     (State.RECOVERED, "Recovered"),
+        #     (State.VACCINATED, "Vaccinated")
+        # ]
         
-        box_h = len(legend_items) * row_h + padding * 2
+        # box_h = len(legend_items) * row_h + padding * 2
         
-        # Background with semi-transparency
-        bg = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
-        bg.fill((0, 0, 0, 180))
-        self.screen.blit(bg, (legend_x, legend_y))
+        # # Background with semi-transparency
+        # bg = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+        # bg.fill((0, 0, 0, 180))
+        # self.screen.blit(bg, (legend_x, legend_y))
         
-        # Border
-        pygame.draw.rect(self.screen, (100, 120, 140), (legend_x, legend_y, box_w, box_h), 2)
+        # # Border
+        # pygame.draw.rect(self.screen, (100, 120, 140), (legend_x, legend_y, box_w, box_h), 2)
         
-        # Draw each state with its color
-        for i, (state, label) in enumerate(legend_items):
-            y = legend_y + padding + i * row_h
-            color = self.state_colors[state]
-            
-            # Color square
-            pygame.draw.rect(self.screen, color, (legend_x + padding, y + 4, 12, 12))
-            pygame.draw.rect(self.screen, (200, 200, 200), (legend_x + padding, y + 4, 12, 12), 1)
-            
-            # Label text
-            text = self.font.render(label, True, (220, 220, 220))
-            self.screen.blit(text, (legend_x + padding + 18, y + 3))
+        # # Draw each state with its color
+        # for i, (state, label) in enumerate(legend_items):
+        #     y = legend_y + padding + i * row_h
+        #     color = self.state_colors[state]
+        #     
+        #     # Color square
+        #     pygame.draw.rect(self.screen, color, (legend_x + padding, y + 4, 12, 12))
+        #     pygame.draw.rect(self.screen, (200, 200, 200), (legend_x + padding, y + 4, 12, 12), 1)
+        #     
+        #     # Label text
+        #     text = self.font.render(label, True, (220, 220, 220))
+        #     self.screen.blit(text, (legend_x + padding + 18, y + 3))
 
     def _render_hud(self):
-        """Draw HUD with FPS, agents, commuters, and infection counts"""
-        hud_x = self.screen.get_width() - 200
-        hud_y = 15
-        hud_w = 185
-        hud_h = 105
+        pass
+        # """Draw HUD with FPS, agents, commuters, and infection counts"""
+        # hud_x = self.screen.get_width() - 200
+        # hud_y = 15
+        # hud_w = 185
+        # hud_h = 105
         
-        hud_bg = pygame.Surface((hud_w, hud_h), pygame.SRCALPHA)
-        hud_bg.fill((0, 0, 0, 180))
-        self.screen.blit(hud_bg, (hud_x, hud_y))
-        pygame.draw.rect(self.screen, (100, 180, 200), (hud_x, hud_y, hud_w, hud_h), 2)
+        # hud_bg = pygame.Surface((hud_w, hud_h), pygame.SRCALPHA)
+        # hud_bg.fill((0, 0, 0, 180))
+        # self.screen.blit(hud_bg, (hud_x, hud_y))
+        # pygame.draw.rect(self.screen, (100, 180, 200), (hud_x, hud_y, hud_w, hud_h), 2)
 
-        self.fps = self.fps_clock.get_fps()
-        fps_color = (100, 200, 100) if self.fps > 45 else (255, 200, 100) if self.fps > 30 else (255, 100, 100)
-        fps_text = self.font_small.render(f"FPS: {self.fps:.1f}", True, fps_color)
-        self.screen.blit(fps_text, (hud_x + 15, hud_y + 10))
+        # self.fps = self.fps_clock.get_fps()
+        # fps_color = (100, 200, 100) if self.fps > 45 else (255, 200, 100) if self.fps > 30 else (255, 100, 100)
+        # fps_text = self.font_small.render(f"FPS: {self.fps:.1f}", True, fps_color)
+        # self.screen.blit(fps_text, (hud_x + 15, hud_y + 10))
 
-        agents_text = self.font_small.render(f"Agents: {self.total_agents}", True, (200, 200, 200))
-        commuters_text = self.font_small.render(f"Commuters: {self.total_commuters}", True, (180, 200, 255))
+        # agents_text = self.font_small.render(f"Agents: {self.total_agents}", True, (200, 200, 200))
+        # commuters_text = self.font_small.render(f"Commuters: {self.total_commuters}", True, (180, 200, 255))
 
-        exposed = 0
-        infectious = 0
-        for city in self.cities:
-            for district in city.districts:
-                for p in district.people:
-                    if p.state == State.EXPOSED:
-                        exposed += 1
-                    elif p.state == State.INFECTIOUS:
-                        infectious += 1
+        # exposed = 0
+        # infectious = 0
+        # for city in self.cities:
+        #     for district in city.districts:
+        #         for p in district.people:
+        #             if p.state == State.EXPOSED:
+        #                 exposed += 1
+        #             elif p.state == State.INFECTIOUS:
+        #                 infectious += 1
 
-        exposed_text = self.font_small.render(f"Exposed: {exposed}", True, (255, 200, 120))
-        infectious_text = self.font_small.render(f"Infectious: {infectious}", True, (255, 120, 120))
+        # exposed_text = self.font_small.render(f"Exposed: {exposed}", True, (255, 200, 120))
+        # infectious_text = self.font_small.render(f"Infectious: {infectious}", True, (255, 120, 120))
 
-        self.screen.blit(agents_text, (hud_x + 15, hud_y + 28))
-        self.screen.blit(commuters_text, (hud_x + 15, hud_y + 44))
-        self.screen.blit(exposed_text, (hud_x + 15, hud_y + 60))
-        self.screen.blit(infectious_text, (hud_x + 15, hud_y + 76))
+        # self.screen.blit(agents_text, (hud_x + 15, hud_y + 28))
+        # self.screen.blit(commuters_text, (hud_x + 15, hud_y + 44))
+        # self.screen.blit(exposed_text, (hud_x + 15, hud_y + 60))
+        # self.screen.blit(infectious_text, (hud_x + 15, hud_y + 76))
 
     def _render_hover_info(self):
         info = self.interaction.get_hover_info()

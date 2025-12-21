@@ -1,37 +1,47 @@
 import pygame
 import sys
-from  graphics.optimized_renderer import OptimizedRenderer
-from  graphics.camera import Camera
-from  graphics.visual_effects import VisualEffects
-from  ui.interaction import Interaction
-from  ui.ui_manager import UIManagerWrapper
-from  ui.dashboard import Dashboard
-from  ui.minimap import Minimap
-from  core.time_engine import TimeEngine
-from  core.numpy_engine import NumpySimulationEngine
-from  core.statistics import StatisticsManager
-from  data.world_generator import WorldGenerator
-from  data.persistence import PersistenceManager
-from  data.export import DataExporter
-from  entities.person import State
+from graphics.optimized_renderer import OptimizedRenderer
+from graphics.camera import Camera
+from graphics.visual_effects import VisualEffects
+from ui.interaction import Interaction
+from ui.control_panel import ControlPanel  # NEW: Professional left panel
+from ui.right_stats_panel import RightStatsPanel  # NEW: Professional right panel
+from ui.god_mode import GodModePanel
+from ui.minimap import Minimap
+from core.time_engine import TimeEngine
+from core.numpy_engine import NumpySimulationEngine
+from core.statistics import StatisticsManager
+from data.world_generator import WorldGenerator
+from data.persistence import PersistenceManager
+from data.export import DataExporter
+from entities.person import State
 import random
 import math
 
 class BioSpatialApp:
     def __init__(self):
+        # Fix for high DPI displays on Windows
+        try:
+            import ctypes
+            ctypes.windll.user32.SetProcessDPIAware()
+        except:
+            pass
+
         pygame.init()
-        # Increase main app window size
-        self.width = 1600
-        self.height = 900
         
-        # Initialize Window (Standard Pygame) - RESIZABLE flag for window resizing
-        self.screen = pygame.display.set_mode((self.width, self.height), pygame.DOUBLEBUF | pygame.RESIZABLE)
-        pygame.display.set_caption("Bio-Spatial Epidemic Simulator (Optimized)")
+        # Get screen dimensions
+        info = pygame.display.Info()
+        self.width = info.current_w
+        self.height = info.current_h
+        
+        # Initialize Window - Start in Fullscreen to ensure it fits
+        self.screen = pygame.display.set_mode((self.width, self.height), pygame.FULLSCREEN | pygame.DOUBLEBUF)
+        pygame.display.set_caption("Bio-Spatial Epidemic Simulator")
         
         self.clock = pygame.time.Clock()
         self.running = True
-        self.is_fullscreen = False  # Track fullscreen state
-        self.show_fps = True  # Toggle FPS display
+        self.is_fullscreen = True
+        self.show_fps = True
         
         self.camera = Camera(self.width, self.height)
         
@@ -42,9 +52,9 @@ class BioSpatialApp:
         self.time_engine = TimeEngine()
         self.cities = WorldGenerator.generate_world(num_cities=5)
         
-        # Initialize renderer AFTER cities are generated (needs them for commuter count)
+        # Initialize renderer AFTER cities are generated
         self.renderer = OptimizedRenderer(self.screen, self.camera)
-        self.renderer.set_cities(self.cities)  # Set cities and compute commuter stats
+        self.renderer.set_cities(self.cities)
         self.world_bounds = self._compute_world_bounds(self.cities)
         self.simulation_engine = NumpySimulationEngine(self.cities)
         self.stats_manager = StatisticsManager()
@@ -59,16 +69,30 @@ class BioSpatialApp:
         
         # Infect mode state
         self.infect_mode = False
-        self.infect_radius = 75  # Radius for infection zone
-
-        # New UI Manager
-        self.ui_manager = UIManagerWrapper(self.width, self.height, self.simulation_engine)
-        # Ensure God Mode panel is visible by default
-        self.ui_manager.toggle_god_mode()
+        self.infect_radius = 75
         
+        # NEW: Professional UI Panels (replace old UI)
+        self.control_panel = ControlPanel(self.width, self.height)
+        self.stats_panel = RightStatsPanel(self.width, self.height)
+        self.god_mode_panel = GodModePanel(self.width, self.height, self.simulation_engine)
         self.minimap = Minimap(self.width, self.height)
+        
+        # God Mode Button (Top Right)
+        self.god_btn_rect = pygame.Rect(self.width - 140, 10, 120, 40)
+        
+        # Setup callbacks for control panel
+        self.control_panel.on_save = self.save_simulation
+        self.control_panel.on_load = self.load_simulation
+        self.control_panel.on_export = self.export_data
+        # self.control_panel.on_god_mode = self.toggle_god_mode # Removed from control panel
+        
+        # God mode panel state (if you want to keep the pygame_gui version)
+        self.god_mode_active = False
+        
+        # Set world bounds for minimap in stats panel
         if self.world_bounds:
             min_x, min_y, max_x, max_y = self.world_bounds
+            self.stats_panel.set_world_bounds(min_x, min_y, max_x, max_y)
             self.minimap.set_world_bounds(min_x, min_y, max_x, max_y)
             self.camera.frame_bounds(min_x, min_y, max_x, max_y)
         
@@ -155,7 +179,6 @@ class BioSpatialApp:
 
     def export_data(self):
         print("Exporting simulation data...")
-        # Export multiple formats
         success = True
         
         # CSV export
@@ -183,14 +206,23 @@ class BioSpatialApp:
         
         return success
 
+    def toggle_god_mode(self):
+        self.god_mode_panel.toggle()
+
     def toggle_fullscreen(self):
         """Toggle fullscreen mode (F11)"""
         self.is_fullscreen = not self.is_fullscreen
         if self.is_fullscreen:
             self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN | pygame.DOUBLEBUF)
+            # Get actual fullscreen dimensions
+            info = pygame.display.Info()
+            self.width = info.current_w
+            self.height = info.current_h
         else:
             self.screen = pygame.display.set_mode((self.width, self.height), pygame.DOUBLEBUF | pygame.RESIZABLE)
-        pygame.display.set_caption("Bio-Spatial Epidemic Simulator (Optimized)")
+        
+        self.handle_window_resize(self.width, self.height)
+        pygame.display.set_caption("Bio-Spatial Epidemic Simulator")
     
     def handle_window_resize(self, new_width, new_height):
         """Handle window resize event"""
@@ -201,28 +233,34 @@ class BioSpatialApp:
             self.camera.height = new_height
             self.ui_surface = pygame.Surface((new_width, new_height), pygame.SRCALPHA)
             self.renderer.screen = self.screen
-            # Update minimap position and size on window resize
-            self.minimap.size = 200  # Keep consistent size
+            
+            # Update panel dimensions
+            self.control_panel.height = new_height
+            self.control_panel.rect.height = new_height
+            self.stats_panel.height = new_height
+            self.stats_panel.rect.height = new_height
+            self.stats_panel.screen_width = new_width
+            
+            # Update minimap position
             self.minimap.x = new_width - self.minimap.size - 10
             self.minimap.y = new_height - self.minimap.size - 10
-            self.minimap.rect = pygame.Rect(self.minimap.x, self.minimap.y, self.minimap.size, self.minimap.size)
-            # Update UI manager dimensions
-            self.ui_manager.width = new_width
-            self.ui_manager.height = new_height
-
-    def export_data(self):
-        print("Exporting data...")
-        if DataExporter.export_csv("simulation_data.csv", self.stats_manager):
-            print("Export successful!")
-        else:
-            print("Export failed.")
+            self.minimap.rect.x = self.minimap.x
+            self.minimap.rect.y = self.minimap.y
+            
+            # Update God Mode Button
+            self.god_btn_rect.x = new_width - 140
+            
+            # Update God Mode Panel position (center it)
+            self.god_mode_panel.center_on_screen(new_width, new_height)
 
     def handle_input(self):
         dt = self.clock.get_time() / 1000.0
+        mouse_pos = pygame.mouse.get_pos()
         
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
+            
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self.running = False
@@ -231,64 +269,76 @@ class BioSpatialApp:
                         min_x, min_y, max_x, max_y = self.world_bounds
                         self.camera.frame_bounds(min_x, min_y, max_x, max_y)
                 elif event.key == pygame.K_g:
-                    # Toggle God Mode window via keyboard
-                    self.ui_manager.toggle_god_mode()
+                    self.toggle_god_mode()
                 elif event.key == pygame.K_F11:
-                    # Toggle fullscreen (F11)
                     self.toggle_fullscreen()
                 elif event.key == pygame.K_SPACE:
-                    # Toggle pause (Space)
-                    self.ui_manager.toggle_pause()
+                    self.control_panel.toggle_pause()
+                elif event.key == pygame.K_1:
+                    self.control_panel.set_speed(1.0)
+                elif event.key == pygame.K_2:
+                    self.control_panel.set_speed(2.0)
+                elif event.key == pygame.K_5:
+                    self.control_panel.set_speed(5.0)
                 elif event.key == pygame.K_EQUALS or event.key == pygame.K_PLUS:
-                    # Increase speed (+)
-                    new_speed = self.ui_manager.speed + 1.0
-                    self.ui_manager.sim_speed_slider.set_current_value(min(new_speed, 20.0))
+                    new_speed = min(self.control_panel.speed + 1.0, 20.0)
+                    self.control_panel.set_speed(new_speed)
                 elif event.key == pygame.K_MINUS:
-                    # Decrease speed (-)
-                    new_speed = self.ui_manager.speed - 1.0
-                    self.ui_manager.sim_speed_slider.set_current_value(max(new_speed, 0.5))
+                    new_speed = max(self.control_panel.speed - 1.0, 0.5)
+                    self.control_panel.set_speed(new_speed)
                 elif event.key == pygame.K_h:
-                    # Toggle FPS display (H)
                     self.show_fps = not self.show_fps
                 elif event.key == pygame.K_t:
-                    # Enter box-select tracing mode
                     self.interaction.tracing_enabled = True
                     self.interaction.begin_box_select()
                 # Save/Load shortcuts with Ctrl modifier
                 elif event.key == pygame.K_s and (event.mod & pygame.KMOD_CTRL):
-                    # Save (Ctrl+S)
                     self.save_simulation()
                 elif event.key == pygame.K_l and (event.mod & pygame.KMOD_CTRL):
-                    # Load (Ctrl+L)
                     self.load_simulation()
                 elif event.key == pygame.K_e and (event.mod & pygame.KMOD_CTRL):
-                    # Export (Ctrl+E)
                     self.export_data()
+            
             elif event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    # Check God Mode Button
+                    if self.god_btn_rect.collidepoint(event.pos):
+                        self.toggle_god_mode()
+                        return # Consume click
+                
                 if event.button == 1 and self.interaction.box_select_active:
-                    self.interaction.start_box(pygame.mouse.get_pos())
-                elif event.button == 1 and (pygame.key.get_mods() & pygame.KMOD_SHIFT):  # Left click + Shift
-                    mouse_x, mouse_y = pygame.mouse.get_pos()
-                    world_pos = self.camera.screen_to_world(mouse_x, mouse_y)
+                    self.interaction.start_box(mouse_pos)
+                elif event.button == 1 and (pygame.key.get_mods() & pygame.KMOD_SHIFT):
+                    world_pos = self.camera.screen_to_world(*mouse_pos)
                     self._infect_at_point(world_pos, self.infect_radius)
                 elif event.button == 1:
-                    self.interaction.select_entity_at_mouse(self.cities)
+                    # Check if click is on UI panels first
+                    if not self._is_click_on_panels(mouse_pos):
+                        self.interaction.select_entity_at_mouse(self.cities)
                 elif event.button == 3:
                     self.interaction.clear_selection()
+            
             elif event.type == pygame.MOUSEMOTION:
-                self.interaction.update_box(pygame.mouse.get_pos())
+                self.interaction.update_box(mouse_pos)
+            
             elif event.type == pygame.MOUSEBUTTONUP:
                 if event.button == 1 and self.interaction.box_select_active:
                     self.interaction.finalize_box_select(self.cities)
+            
             elif event.type == pygame.VIDEORESIZE:
-                # Handle window resize
                 if not self.is_fullscreen:
                     self.handle_window_resize(event.w, event.h)
             
-            # Pass event to UI Manager
-            self.ui_manager.handle_event(event)
+            # Pass events to UI panels (they consume if handled)
+            if self.god_mode_panel.handle_event(event):
+                continue
+
+            if self.control_panel.handle_event(event):
+                continue
+            
+            if self.stats_panel.handle_event(event, self.camera):
+                continue
                 
-            # Pass event to Minimap
             if self.minimap.handle_event(event, self.camera):
                 continue
             
@@ -301,90 +351,149 @@ class BioSpatialApp:
         # Handle Interaction (Hover)
         self.interaction.handle_input(self.cities)
 
+    def _is_click_on_panels(self, mouse_pos):
+        """Check if mouse click is on any UI panel"""
+        mx, my = mouse_pos
+        
+        # Check control panel (left side)
+        if self.control_panel.rect.collidepoint(mx, my):
+            return True
+        
+        # Check stats panel (right side)
+        if self.stats_panel.rect.collidepoint(mx, my):
+            return True
+            
+        # Check minimap
+        if self.minimap.rect.collidepoint(mx, my):
+            return True
+            
+        # Check god mode panel
+        if self.god_mode_panel.visible and self.god_mode_panel.rect.collidepoint(mx, my):
+            return True
+        
+        return False
+
     def update(self):
         dt = self.clock.get_time() / 1000.0
-        self.ui_manager.update(dt, self.stats_manager)
+        mouse_pos = pygame.mouse.get_pos()
+        
+        # Update UI panels (for hover detection and animation)
+        self.control_panel.update(mouse_pos)
+        self.stats_panel.update(mouse_pos)
         
         self.camera.update()
         self.visual_effects.update()
         
-        if not self.ui_manager.paused:
-            # Run multiple updates based on speed with an upper cap to reduce lag
-            speed_factor = self.ui_manager.speed
-            # Keep logic updates modest to avoid heavy CPU when speed is high
+        if not self.control_panel.paused:
+            # Run multiple updates based on speed
+            speed_factor = self.control_panel.speed
             steps = max(1, int(math.ceil(speed_factor)))
             steps = min(steps, 4)
+            
             for _ in range(steps):
                 self.time_engine.update()
                 
-                # Update all cities (movement, state timers)
-                # Note: NumpyEngine handles movement now, so we don't need city.update()
-                # UNLESS city.update() does something else?
-                # city.update() calls person.update(). NumpyEngine replaces this.
-                # So we skip city.update().
-                
-                # Run simulation logic (infections + movement) with dt for smooth motion
+                # Run simulation logic (infections + movement)
                 self.simulation_engine.update(self.time_engine, dt)
                 
                 # Update vaccination efficacy decay
-                self.simulation_engine.update_vaccination_efficacy(days=1/20)  # Update proportionally per tick
+                self.simulation_engine.update_vaccination_efficacy(days=1/20)
                 
-                # Update stats every 20 ticks (optimization: reduced from 10 for better performance)
+                # Update stats every 20 ticks
                 if self.time_engine.ticks % 20 == 0:
-                    self.stats_manager.update(self.cities, self.time_engine.current_day + self.time_engine.hour/24, engine=self.simulation_engine)
-
+                    self.stats_manager.update(
+                        self.cities, 
+                        self.time_engine.current_day + self.time_engine.hour/24, 
+                        engine=self.simulation_engine
+                    )
+            
             # Record trace point for the currently selected person
             self.interaction.record_trace_point()
 
-
     def render(self):
         # 1. Render World
-        # Keep full detail until extreme speeds (only use min_detail above 18.0 speed)
-        # This preserves visual clarity at normal playing speeds
-        if self.ui_manager.speed > 18.0:
+        if self.control_panel.speed > 18.0:
             self.renderer.render(min_detail=True)
         else:
             self.renderer.render()
-
-        # Minimap overlay: Always render; include trace polyline when active
-        trace_pts = self.interaction.trace_points if (self.interaction.tracing_enabled and self.interaction.trace_points) else None
-        self.minimap.render(self.screen, self.cities, self.camera, trace_pts)
         
-        # 2. Render UI (Pygame Surface)
-        self.ui_surface.fill((0, 0, 0, 0)) # Clear
+        # 2. Render UI Overlay (Time, FPS, Tracing info)
+        self.ui_surface.fill((0, 0, 0, 0))
         
-        # Render UI overlay (Time)
+        # Time display (top-left, but below where panels might slide)
         time_surf = self.font_main.render(self.time_engine.get_time_string(), True, (255, 255, 255))
-        self.ui_surface.blit(time_surf, (10, 10))
+        self.ui_surface.blit(time_surf, (self.width // 2 - 100, 10))
         
-        # Render FPS counter if enabled (H key to toggle)
+        # FPS counter
         if self.show_fps:
             fps = self.clock.get_fps()
-            # Color code: green >45, yellow >30, red <30
             if fps > 45:
-                fps_color = (0, 255, 0)  # Green
+                fps_color = (0, 255, 0)
             elif fps > 30:
-                fps_color = (255, 255, 0)  # Yellow
+                fps_color = (255, 255, 0)
             else:
-                fps_color = (255, 0, 0)  # Red
+                fps_color = (255, 0, 0)
             fps_surf = self.font_main.render(f"FPS: {fps:.1f}", True, fps_color)
-            self.ui_surface.blit(fps_surf, (10, 40))
-
-        # Render tracing status
+            self.ui_surface.blit(fps_surf, (self.width // 2 - 100, 40))
+        
+        # Tracing status
         if self.interaction.tracing_enabled and self.interaction.selected_entity:
             state_name = getattr(getattr(self.interaction.selected_entity, 'state', None), 'name', 'Unknown')
             trace_txt = f"Tracing: {getattr(self.interaction.selected_entity, 'uid', 'unknown')} ({state_name})"
             trace_surf = self.font_main.render(trace_txt, True, (0, 240, 255))
-            self.ui_surface.blit(trace_surf, (10, 70))
+            self.ui_surface.blit(trace_surf, (self.width // 2 - 150, 70))
         
-        # Render drag-to-infect visual feedback
+        # Keyboard shortcuts help (bottom center)
+        help_font = pygame.font.SysFont("Arial", 14)
+        shortcuts = [
+            "SPACE: Pause/Play | 1/2/5: Speed | T: Trace Person | F: Frame View",
+            "SHIFT+Click: Infect Area | H: Toggle FPS | Ctrl+S: Save | Ctrl+L: Load"
+        ]
+        y_offset = self.height - 50
+        for text in shortcuts:
+            help_surf = help_font.render(text, True, (180, 180, 180))
+            help_rect = help_surf.get_rect(center=(self.width // 2, y_offset))
+            self.ui_surface.blit(help_surf, help_rect)
+            y_offset += 20
+        
         # 3. Composite UI onto Screen
         self.renderer.render_overlay(self.ui_surface)
         
-        # 4. Draw Pygame GUI (Directly to screen)
-        self.ui_manager.manager.draw_ui(self.screen)
+        # 4. Render Professional UI Panels (always on top)
+        self.control_panel.render(self.screen)
         
-        # 5. Swap Buffers
+        # Render God Mode Button
+        # Hover effect
+        mx, my = pygame.mouse.get_pos()
+        hover = self.god_btn_rect.collidepoint(mx, my)
+        color = (180, 140, 0) if not hover else (220, 180, 20)
+        pygame.draw.rect(self.screen, color, self.god_btn_rect, border_radius=8)
+        pygame.draw.rect(self.screen, (255, 215, 0), self.god_btn_rect, 2, border_radius=8)
+        
+        font = pygame.font.SysFont("Arial", 16, bold=True)
+        text_surf = font.render("GOD MODE", True, (255, 255, 255))
+        text_rect = text_surf.get_rect(center=self.god_btn_rect.center)
+        self.screen.blit(text_surf, text_rect)
+        
+        # Pass trace points to stats panel for minimap visualization
+        trace_points = self.interaction.trace_points if (self.interaction.tracing_enabled and self.interaction.trace_points) else None
+
+        # Render Minimap
+        self.minimap.render(self.screen, self.cities, self.camera, trace_points)
+
+        self.stats_panel.render(self.screen, self.stats_manager, self.cities, self.camera, trace_points)
+        
+        # Render God Mode Panel
+        self.god_mode_panel.render(self.screen)
+        
+        # 5. Draw box select rectangle if active
+        if self.interaction.box_select_active and self.interaction.box_start and self.interaction.box_end:
+            x1, y1 = self.interaction.box_start
+            x2, y2 = self.interaction.box_end
+            rect = pygame.Rect(min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1))
+            pygame.draw.rect(self.screen, (0, 255, 255), rect, 2)
+        
+        # 6. Swap Buffers
         pygame.display.flip()
 
     def run(self):
@@ -396,6 +505,7 @@ class BioSpatialApp:
 
         pygame.quit()
         sys.exit()
+
 
 if __name__ == "__main__":
     app = BioSpatialApp()

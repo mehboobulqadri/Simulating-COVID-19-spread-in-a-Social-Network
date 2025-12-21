@@ -5,16 +5,19 @@ class GodModePanel:
     def __init__(self, screen_width, screen_height, simulation_engine):
         self.width = 300
         self.height = 400
-        self.x = 20
-        self.y = 100
+        self.x = (screen_width - self.width) // 2
+        self.y = (screen_height - self.height) // 2
         self.rect = pygame.Rect(self.x, self.y, self.width, self.height)
         self.visible = False
         self.engine = simulation_engine
         
+        # Close button
+        self.close_btn_rect = pygame.Rect(self.x + self.width - 30, self.y + 10, 20, 20)
+        
         # Sliders configuration
         # (label, attribute_name, min_val, max_val)
         self.sliders = [
-            {'label': 'Infection Prob', 'attr': 'infection_probability', 'min': 0.0, 'max': 1.0},
+            {'label': 'Infection Prob', 'attr': 'infection_prob', 'min': 0.0, 'max': 1.0},
             {'label': 'Infection Radius', 'attr': 'infection_radius', 'min': 1.0, 'max': 50.0},
             {'label': 'Vaccination Threshold', 'attr': 'vaccination_threshold', 'min': 0.0, 'max': 1.0},
             {'label': 'Vaccination Rate', 'attr': 'vaccination_rate', 'min': 0.0, 'max': 0.1},
@@ -24,6 +27,14 @@ class GodModePanel:
         self.dragging_slider = None
         self.hovered_slider = None
 
+    def center_on_screen(self, screen_width, screen_height):
+        self.x = (screen_width - self.width) // 2
+        self.y = (screen_height - self.height) // 2
+        self.rect.x = self.x
+        self.rect.y = self.y
+        self.close_btn_rect.x = self.x + self.width - 30
+        self.close_btn_rect.y = self.y + 10
+
     def toggle(self):
         self.visible = not self.visible
 
@@ -31,6 +42,21 @@ class GodModePanel:
         if not self.visible:
             return False
             
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            # Check close button
+            if self.close_btn_rect.collidepoint(event.pos):
+                self.visible = False
+                return True
+                
+            # Check click outside
+            if not self.rect.collidepoint(event.pos):
+                self.visible = False
+                return False # Let other things handle the click too? Or consume it? 
+                             # Usually if it's a modal, we might consume it, but here "click anywhere else" implies closing.
+                             # If we return False, the click might trigger something else (like selecting a person).
+                             # Let's return True to consume the click that closed the menu, to avoid accidental interactions.
+                return True
+
         if event.type == pygame.MOUSEMOTION:
             self.hovered_slider = None
             mx, my = event.pos
@@ -91,6 +117,13 @@ class GodModePanel:
         title_font = UITheme.get_font(20, bold=True)
         title = title_font.render("GOD MODE SETTINGS", True, (255, 215, 0))
         screen.blit(title, (self.x + 20, self.y + 15))
+        
+        # Close Button (X)
+        pygame.draw.rect(screen, (200, 50, 50), self.close_btn_rect, border_radius=4)
+        close_font = UITheme.get_font(16, bold=True)
+        close_txt = close_font.render("X", True, (255, 255, 255))
+        close_rect = close_txt.get_rect(center=self.close_btn_rect.center)
+        screen.blit(close_txt, close_rect)
         
         # Sliders
         label_font = UITheme.get_font(14)

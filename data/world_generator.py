@@ -50,6 +50,95 @@ class WorldGenerator:
         print("Social networks generated!")
 
     @staticmethod
+    def _generate_city_positions(num_cities, map_width, map_height, min_distance=800):
+        """
+        Generate non-overlapping city positions with better spacing
+        
+        Args:
+            num_cities: Number of cities to place
+            map_width: Width of the map
+            map_height: Height of the map  
+            min_distance: Minimum distance between city centers
+            
+        Returns:
+            List of (x, y) positions
+        """
+        positions = []
+        max_attempts = 1000
+        
+        # Add margins to keep cities away from edges
+        margin = 500
+        valid_min_x = margin
+        valid_max_x = map_width - margin
+        valid_min_y = margin
+        valid_max_y = map_height - margin
+        
+        # Calculate city footprint (grid size)
+        # Each city is about 6x6 blocks * 120 = 720 units wide
+        city_radius = 360  # Half of city size for collision detection
+        effective_min_distance = max(min_distance, city_radius * 2 + 200)
+        
+        print(f"\nGenerating {num_cities} cities with minimum distance: {effective_min_distance}")
+        
+        # Place first city near center
+        if num_cities > 0:
+            center_x = map_width // 2 + random.randint(-200, 200)
+            center_y = map_height // 2 + random.randint(-200, 200)
+            positions.append((center_x, center_y))
+            print(f"  ✓ City 1 placed at center ({center_x}, {center_y})")
+        
+        # Place remaining cities
+        for i in range(1, num_cities):
+            placed = False
+            attempts = 0
+            best_position = None
+            best_min_dist = 0
+            
+            while attempts < max_attempts:
+                # Generate random candidate position
+                cx = random.randint(valid_min_x, valid_max_x)
+                cy = random.randint(valid_min_y, valid_max_y)
+                
+                # Check distance to all existing cities
+                min_dist = float('inf')
+                valid = True
+                
+                for existing_x, existing_y in positions:
+                    dist = math.hypot(cx - existing_x, cy - existing_y)
+                    min_dist = min(min_dist, dist)
+                    
+                    if dist < effective_min_distance:
+                        valid = False
+                        break
+                
+                # If we found a valid position, use it
+                if valid:
+                    positions.append((cx, cy))
+                    placed = True
+                    print(f"  ✓ City {i+1} placed at ({cx}, {cy}) - min distance: {min_dist:.0f}")
+                    break
+                
+                # Track the best position we've found
+                if min_dist > best_min_dist:
+                    best_min_dist = min_dist
+                    best_position = (cx, cy)
+                
+                attempts += 1
+            
+            # If we couldn't place with ideal distance, use best position
+            if not placed and best_position:
+                positions.append(best_position)
+                print(f"  ⚠ City {i+1} placed at best position ({best_position[0]}, {best_position[1]}) - distance: {best_min_dist:.0f}")
+            elif not placed:
+                # Last resort: place it somewhere
+                cx = random.randint(valid_min_x, valid_max_x)
+                cy = random.randint(valid_min_y, valid_max_y)
+                positions.append((cx, cy))
+                print(f"  ⚠ City {i+1} placed randomly after {max_attempts} attempts")
+        
+        return positions
+
+    @staticmethod
     def generate_world(num_cities=3, map_width=3000, map_height=3000):
         cities = []
         
@@ -57,24 +146,20 @@ class WorldGenerator:
         block_size = 120
         road_width = 15
         
-        for i in range(num_cities):
-            # Place city center far from others
-            valid = False
-            cx, cy = 0, 0
-            while not valid:
-                cx = random.randint(500, map_width - 500)
-                cy = random.randint(500, map_height - 500)
-                valid = True
-                for c in cities:
-                    if math.hypot(c.location[0]-cx, c.location[1]-cy) < 800:
-                        valid = False
-                        break
-            
+        # Generate non-overlapping city positions
+        city_positions = WorldGenerator._generate_city_positions(
+            num_cities, 
+            map_width, 
+            map_height,
+            min_distance=1000  # Adjust this to change spacing
+        )
+        
+        for i, (cx, cy) in enumerate(city_positions):
             city = City(f"c_{i}", f"City {i+1}", (cx, cy))
             city.roads = [] # Add roads list to city
             
             # Generate Grid Layout
-            # Create a central grid of 5x5 blocks
+            # Create a central grid of 6x6 blocks
             grid_w, grid_h = 6, 6
             
             start_x = cx - (grid_w * block_size) // 2
@@ -153,6 +238,8 @@ class WorldGenerator:
                     district_idx += 1
             
             cities.append(city)
+        
+        print(f"\n✓ Generated {len(cities)} cities with proper spacing")
             
         # Assign Work Locations (with cross-city commuters)
         city_workplaces = []
@@ -203,6 +290,8 @@ class WorldGenerator:
         """Generate roads connecting city centers"""
         if len(cities) < 2:
             return
+        
+        print("\nGenerating inter-city highways...")
             
         # Connect each city to its nearest neighbors
         for i, city_a in enumerate(cities):
@@ -213,13 +302,127 @@ class WorldGenerator:
                                      city_a.location[1] - city_b.location[1])
                     distances.append((dist, j, city_b))
             
-            # Connect to 2 nearest cities
+            # Connect to 2 nearest cities (or all if less than 2)
             distances.sort()
-            for _, j, city_b in distances[:2]:
+            num_connections = min(2, len(distances))
+            
+            for _, j, city_b in distances[:num_connections]:
                 # Create highway between cities
                 road = Road(city_a.location, city_b.location, width=20, kind="highway")
                 # Store on both cities to avoid duplicates
                 if not hasattr(city_a, 'highways'):
                     city_a.highways = []
                 city_a.highways.append(road)
+                print(f"  ✓ Highway: {city_a.name} → {city_b.name}")
+        
+        print("Inter-city highways generated!")
+    
+    @staticmethod
+    def visualize_city_layout(cities, map_width=3000, map_height=3000):
+        """
+        Debug function to visualize city placement
+        Prints a simple ASCII representation with distance validation
+        """
+        print("\n" + "="*70)
+        print("CITY LAYOUT VISUALIZATION")
+        print("="*70)
+        
+        # Calculate grid size for ASCII visualization
+        grid_width = 70
+        grid_height = 25
+        grid = [[' ' for _ in range(grid_width)] for _ in range(grid_height)]
+        
+        # Plot cities on grid
+        for i, city in enumerate(cities):
+            x = int((city.location[0] / map_width) * (grid_width - 1))
+            y = int((city.location[1] / map_height) * (grid_height - 1))
+            x = max(0, min(grid_width - 1, x))
+            y = max(0, min(grid_height - 1, y))
+            
+            # Use letter labels for up to 26 cities
+            label = chr(65 + i) if i < 26 else str(i)
+            grid[y][x] = label
+        
+        # Print grid
+        print("┌" + "─" * grid_width + "┐")
+        for row in grid:
+            print("│" + "".join(row) + "│")
+        print("└" + "─" * grid_width + "┘")
+        
+        # Print city details
+        print("\nCITY DETAILS:")
+        for i, city in enumerate(cities):
+            label = chr(65 + i) if i < 26 else str(i)
+            num_districts = len(city.districts)
+            total_pop = sum(len(d.people) for d in city.districts)
+            print(f"  [{label}] {city.name:20} @ ({city.location[0]:6.0f}, {city.location[1]:6.0f}) "
+                  f"- {num_districts} districts, {total_pop} people")
+        
+        # Calculate and print all pairwise distances
+        print(f"\nPAIRWISE DISTANCES:")
+        min_found = float('inf')
+        distances_list = []
+        
+        for i, city1 in enumerate(cities):
+            for j, city2 in enumerate(cities):
+                if i >= j:
+                    continue
+                dx = city2.location[0] - city1.location[0]
+                dy = city2.location[1] - city1.location[1]
+                dist = math.sqrt(dx*dx + dy*dy)
+                min_found = min(min_found, dist)
+                
+                label1 = chr(65 + i) if i < 26 else str(i)
+                label2 = chr(65 + j) if j < 26 else str(j)
+                
+                # Color code based on distance
+                if dist >= 800:
+                    status = "✓"  # Good spacing
+                elif dist >= 600:
+                    status = "○"  # Acceptable
+                else:
+                    status = "✗"  # Too close
+                
+                distances_list.append((dist, status, label1, label2, city1.name, city2.name))
+        
+        # Sort and print distances
+        distances_list.sort()
+        for dist, status, l1, l2, name1, name2 in distances_list:
+            print(f"  {status} [{l1}] {name1:15} ↔ [{l2}] {name2:15}: {dist:6.0f} units")
+        
+        print(f"\n{'='*70}")
+        print(f"Overall minimum distance: {min_found:.0f} units")
+        print(f"Recommended minimum: 800 units")
+        
+        if min_found >= 800:
+            print("✓ All cities have adequate spacing!")
+        elif min_found >= 600:
+            print("○ Cities are close but acceptable")
+        else:
+            print("✗ Warning: Some cities may overlap or be too close")
+        
+        print("="*70 + "\n")
 
+
+# Testing/Debug function
+if __name__ == "__main__":
+    print("Testing WorldGenerator with enhanced city placement...")
+    
+    # Generate world
+    cities = WorldGenerator.generate_world(
+        num_cities=5,
+        map_width=3000,
+        map_height=3000
+    )
+    
+    # Visualize the layout
+    WorldGenerator.visualize_city_layout(cities, map_width=3000, map_height=3000)
+    
+    print(f"\n✓ Successfully generated {len(cities)} cities!")
+    
+    # Print additional statistics
+    total_pop = sum(sum(len(d.people) for d in city.districts) for city in cities)
+    total_districts = sum(len(city.districts) for city in cities)
+    print(f"Total population: {total_pop}")
+    print(f"Total districts: {total_districts}")
+    print(f"Average population per city: {total_pop / len(cities):.0f}")
