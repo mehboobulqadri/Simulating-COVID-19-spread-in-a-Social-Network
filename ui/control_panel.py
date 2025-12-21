@@ -28,6 +28,7 @@ class ControlPanel:
         self.on_save = None
         self.on_load = None
         self.on_export = None
+        self.on_report = None
         self.on_god_mode = None
         
         # Button configuration with original x positions
@@ -69,7 +70,8 @@ class ControlPanel:
         file_ops = [
             ('Save Simulation', self.trigger_save),
             ('Load Simulation', self.trigger_load),
-            ('Export CSV', self.trigger_export)
+            ('Export CSV', self.trigger_export),
+            ('Generate Report', self.trigger_report)
         ]
         
         for label, action in file_ops:
@@ -142,6 +144,9 @@ class ControlPanel:
     
     def trigger_export(self): 
         if self.on_export: self.on_export()
+        
+    def trigger_report(self):
+        if self.on_report: self.on_report()
     
     def trigger_god_mode(self): 
         if self.on_god_mode: self.on_god_mode()

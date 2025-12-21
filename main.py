@@ -104,6 +104,7 @@ class BioSpatialApp:
         self.control_panel.on_save = self.save_simulation
         self.control_panel.on_load = self.load_simulation
         self.control_panel.on_export = self.export_data
+        self.control_panel.on_report = self.generate_report
         # self.control_panel.on_god_mode = self.toggle_god_mode # Removed from control panel
         
         # God mode panel state (if you want to keep the pygame_gui version)
@@ -198,31 +199,71 @@ class BioSpatialApp:
             return False
 
     def export_data(self):
+        """Export simulation data to CSV/JSON"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename_base = f"data/exports/simulation_{timestamp}"
+        
+        # Ensure export directory exists
+        import os
+        if not os.path.exists("data/exports"):
+            os.makedirs("data/exports")
+            
         print("Exporting simulation data...")
-        success = True
+        csv_success = DataExporter.export_csv(f"{filename_base}.csv", self.stats_manager)
+        html_success = DataExporter.export_html(f"{filename_base}.html", self.stats_manager, self.renderer.cities)
+        json_success = DataExporter.export_json(f"{filename_base}.json", self.stats_manager, self.renderer.cities)
         
-        # CSV export
-        if DataExporter.export_csv("simulation_data.csv", self.stats_manager):
+        if csv_success:
             print("✓ CSV export successful!")
-        else:
-            success = False
-        
-        # HTML report export
-        if DataExporter.export_html("simulation_report.html", self.stats_manager, self.cities):
-            print("✓ HTML report generated!")
-        else:
-            success = False
-        
-        # JSON export
-        if DataExporter.export_json("simulation_data.json", self.stats_manager, self.cities):
+        if html_success:
+            print("✓ HTML export generated!")
+        if json_success:
             print("✓ JSON export successful!")
+            
+        if not (csv_success and html_success and json_success):
+            print("⚠ Some exports failed")
+
+    def generate_report(self):
+        """Generate comprehensive report in multiple formats"""
+        # Warning if simulation is running
+        force_generate = False
+        
+        # Simple console confirmation for now (could be GUI dialog later)
+        # Using a non-blocking check approach or blocking dialog
+        
+        print("\n--- REPORT GENERATION ---")
+        if not self.control_panel.paused:
+            print("⚠ WARNING: Simulation is still running!")
+            print("The report will only contain data up to the current moment.")
+            print("It is recommended to PAUSE or wait for completion.")
+            
+            # Auto-pause for generation safety
+            was_paused = self.control_panel.paused
+            self.control_panel.paused = True
+            
+            # In a GUI app, we'd show a dialog here. 
+            # For now we'll proceed but notify the user in console.
+            print(">> Generating incomplete report snapshot...")
         else:
-            success = False
+            was_paused = True # Already paused
+            print("Generating full report...")
+            
+        output_dir = "data/reports"
+        success = DataExporter.generate_comprehensive_report(output_dir, self.stats_manager)
         
         if success:
-            print("✓ All exports completed successfully!")
+            print(f"✓ Report generated successfully in {output_dir}/")
+            # Windows notification or sound could go here
         else:
-            print("⚠ Some exports failed")
+            print("❌ Report generation failed. Check console for details.")
+            
+            print("❌ Report generation failed. Check console for details.")
+            
+        # Restore pause state if we auto-paused
+        if not was_paused:
+            self.control_panel.paused = False
+            
+        print("-------------------------\n")
         
         return success
 

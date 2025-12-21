@@ -234,7 +234,7 @@ class GLRenderer:
         
         # Build line segments from trace points
         line_vertices = []
-        trace_color = [0.0, 0.94, 1.0]  # Cyan (0, 240, 255) / 255
+        trace_color = [0.0, 0.5, 1.0]  # Bright Blue
         
         for i in range(len(trace_points) - 1):
             p1 = trace_points[i]
@@ -286,6 +286,21 @@ class GLRenderer:
                     instance_data[idx:idx+infectious_count, 3:6] = [1.0, 0.2, 0.2]  # red
                     instance_data[idx:idx+infectious_count, 6] = 3.0  # type (glow)
                     idx += infectious_count
+            
+            # Highlight Selected Agent (Blue)
+            if self.interaction and self.interaction.selected_entity:
+                selected = self.interaction.selected_entity
+                # Find index in engine (interaction usually has object, engine has index)
+                # But interaction.selected_entity is the Person object.
+                # Use engine.person_to_index map if available, or brute force if needed (map should exist)
+                if hasattr(self.simulation_engine, 'person_to_index'):
+                     s_idx = self.simulation_engine.person_to_index.get(selected)
+                     if s_idx is not None:
+                         # Override color in the main batch we just wrote
+                         # instance_data 0:num_agents corresponds to indices 0:num_agents
+                         # But be careful if we are reusing buffer. We wrote to [0:num_agents]
+                         instance_data[s_idx, 3:6] = [0.0, 0.5, 1.0] # Bright Blue
+                         instance_data[s_idx, 2] = 8.0 # Make it slightly larger
         
         # Render buildings (batch process from cities)
         for city in self.cities:

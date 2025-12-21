@@ -247,6 +247,7 @@ class Interaction:
             info.append(f"Population: {len(ent.people)}")
             infected = sum(1 for p in ent.people if p.state.name == 'INFECTIOUS')
             info.append(f"Infected: {infected}")
+            info.append(f"Buildings: {len(ent.buildings)}") # Added buildings count
         elif hasattr(ent, 'type') and hasattr(ent, 'bounds'): # Building
             btype = getattr(ent.type, 'name', 'UNKNOWN')
             info.append(f"Building: {btype}")
