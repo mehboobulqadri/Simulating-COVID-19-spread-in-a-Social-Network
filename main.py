@@ -361,6 +361,9 @@ class BioSpatialApp:
                 elif event.key == pygame.K_v:
                     # Cycle active variant for new infections
                     self.simulation_engine.cycle_variant()
+                elif event.key == pygame.K_m:
+                    # Toggle mask wearing
+                    self.simulation_engine.toggle_masks()
                 elif event.key == pygame.K_F11:
                     self.toggle_fullscreen()
                 elif event.key == pygame.K_SPACE:

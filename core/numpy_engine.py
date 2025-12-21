@@ -33,6 +33,9 @@ class NumpySimulationEngine:
         # Age demographics
         self.age = np.zeros(self.num_people, dtype=np.int8)  # Age in years
         
+        # City tracking for infection spread monitoring
+        self.city_id = np.zeros(self.num_people, dtype=np.int8)  # Which city person lives in
+        
         # Vaccination tracking
         self.is_vaccinated = np.zeros(self.num_people, dtype=np.bool_)
         self.vaccination_efficacy = np.zeros(self.num_people, dtype=np.float32)
@@ -44,46 +47,103 @@ class NumpySimulationEngine:
         # Variant tracking (0 = base). Values index into self.variant_profiles
         self.variant_id = np.zeros(self.num_people, dtype=np.int8)
         
+        # NEW REALISM FEATURES
+        # Superspreader designation (10-20% have higher transmission)
+        self.is_superspreader = np.random.random(self.num_people) < 0.15
+        self.superspreader_mult = 2.5
+        
+        # Individual susceptibility variation (genetic/health factors)
+        self.susceptibility = np.random.uniform(0.5, 2.0, self.num_people).astype(np.float32)
+        
+        # Viral load tracking (days since infection for gradual infectiousness)
+        self.days_infected = np.zeros(self.num_people, dtype=np.int32)
+        
+        # Immunity decay for reinfection
+        self.immunity_timer = np.zeros(self.num_people, dtype=np.int32)
+        self.immunity_duration = 360  # 360 ticks (~6 months)
+        
+        # Household clusters (assigned during init)
+        self.household_id = np.zeros(self.num_people, dtype=np.int32)
+        
+        # Location tracking for transmission multipliers
+        self.current_location_type = np.zeros(self.num_people, dtype=np.int8)  # 0=home, 1=work, 2=leisure, 3=other
+        
+        # NPIs (Non-Pharmaceutical Interventions)
+        self.mask_wearing_active = False
+        self.mask_compliance = 0.70
+        self.mask_effectiveness = 0.60
+        self.is_wearing_mask = np.zeros(self.num_people, dtype=np.bool_)
+        
         # Flags: 0=None, 1=HasTarget, 2=Hospitalized
         self.flags = np.zeros(self.num_people, dtype=np.int8)
         
         # Initialize Data
         idx = 0
-        self.person_map = [] # Map index back to object (for compatibility/debugging)
-        self.person_to_index = {} # Fast lookup from person object to array index
+        self.person_map = []
+        self.person_to_index = {}
+        household_counter = 0
         
-        for city in cities:
+        for city_idx, city in enumerate(cities):
             for district in city.districts:
-                for p in district.people:
-                    self.pos[idx] = [p.x, p.y]
-                    self.home[idx] = p.home_location
-                    if p.work_location:
-                        self.work[idx] = p.work_location
+                # Group people into households (2-6 people per household)
+                district_people = district.people
+                household_sizes = []
+                remaining = len(district_people)
+                
+                while remaining > 0:
+                    if remaining == 1:
+                        household_sizes.append(1)
+                        remaining = 0
                     else:
-                        self.work[idx] = p.home_location # No work, stay home
-                    if getattr(p, 'school_location', None):
-                        self.school[idx] = p.school_location
-                    else:
-                        self.school[idx] = p.home_location
-                    if getattr(p, 'lunch_location', None):
-                        self.lunch[idx] = p.lunch_location
-                    else:
-                        self.lunch[idx] = p.work_location if p.work_location else p.home_location
-                    if getattr(p, 'leisure_location', None):
-                        self.leisure[idx] = p.leisure_location
-                    else:
-                        self.leisure[idx] = p.home_location
+                        size = min(random.randint(2, 6), remaining)
+                        household_sizes.append(size)
+                        remaining -= size
+                
+                person_idx_in_district = 0
+                for household_size in household_sizes:
+                    household_counter += 1
+                    household_members = district_people[person_idx_in_district:person_idx_in_district + household_size]
+                    
+                    # Assign same household ID and home location to all members
+                    if household_members:
+                        shared_home = household_members[0].home_location
                         
-                    self.state[idx] = p.state.value
-                    self.speed[idx] = p.speed
-                    self.employed[idx] = getattr(p, 'is_employed', False)
-                    self.student[idx] = getattr(p, 'is_student', False)
-                    self.is_vaccinated[idx] = p.is_vaccinated
-                    self.vaccination_efficacy[idx] = p.vaccination_efficacy
-                    self.days_since_vaccination[idx] = p.days_since_vaccination
-                    self.person_map.append(p)
-                    self.person_to_index[p] = idx
-                    idx += 1
+                        for p in household_members:
+                            self.pos[idx] = [p.x, p.y]
+                            self.home[idx] = shared_home
+                            if p.work_location:
+                                self.work[idx] = p.work_location
+                            else:
+                                self.work[idx] = p.home_location
+                            if getattr(p, 'school_location', None):
+                                self.school[idx] = p.school_location
+                            else:
+                                self.school[idx] = p.home_location
+                            if getattr(p, 'lunch_location', None):
+                                self.lunch[idx] = p.lunch_location
+                            else:
+                                self.lunch[idx] = p.work_location if p.work_location else p.home_location
+                            if getattr(p, 'leisure_location', None):
+                                self.leisure[idx] = p.leisure_location
+                            else:
+                                self.leisure[idx] = p.home_location
+                                
+                            self.state[idx] = p.state.value
+                            self.speed[idx] = p.speed
+                            self.employed[idx] = getattr(p, 'is_employed', False)
+                            self.student[idx] = getattr(p, 'is_student', False)
+                            self.is_vaccinated[idx] = p.is_vaccinated
+                            self.vaccination_efficacy[idx] = p.vaccination_efficacy
+                            self.days_since_vaccination[idx] = p.days_since_vaccination
+                            self.household_id[idx] = household_counter
+                            self.city_id[idx] = city_idx
+                            self.person_map.append(p)
+                            self.person_to_index[p] = idx
+                            idx += 1
+                    
+                    person_idx_in_district += household_size
+        
+        print(f"Created {household_counter} households (avg {self.num_people/max(1, household_counter):.1f} people/household)")
         
         # Initialize quarantine locations to home (will stay home when quarantined)
         self.quarantine_location = self.home.copy()
@@ -162,10 +222,16 @@ class NumpySimulationEngine:
         
         # Settings
         self.vaccination_threshold = 0.3
-        self.vaccination_rate = 0.005  # % of unvaccinated per tick (gradual spread)
+        self.vaccination_rate = 0.001  # 0.1% of unvaccinated per tick (VERY gradual)
         self.hospital_cure_rate = 0.01
         self.vaccination_active = False
         self.vaccination_target_rate = 0.0  # Target population % (0-1)
+        
+        # Auto-vaccination trigger settings
+        self.auto_vaccination_enabled = True
+        self.auto_vaccination_triggered = False
+        self.auto_vacc_death_threshold = 20  # Trigger when 20+ deaths
+        self.auto_vacc_city_threshold = 2  # Trigger when infection in 2+ cities
         
         # Pathfinding
         self.use_road_snapping = False  # Disabled for performance (enables 50+ FPS vs 9 FPS)
@@ -190,6 +256,39 @@ class NumpySimulationEngine:
         # Vaccination statistics
         self.vaccination_day = 0  # Track vaccination campaign day
         self.vaccination_scope_mask = np.ones(self.num_people, dtype=np.bool_)
+        
+        # Hospital capacity system
+        self.hospital_capacity = max(50, int(self.num_people * 0.02))  # 2% of population
+        self.hospitalized = np.zeros(self.num_people, dtype=np.bool_)
+        self.hospital_mortality_multiplier = 2.5  # Mortality increases when hospitals full
+        
+        # Location-based transmission multipliers
+        self.location_transmission_mults = {
+            0: 3.0,   # Home/Family (prolonged close contact)
+            1: 1.5,   # Work/School (indoor, many hours)
+            2: 0.5,   # Leisure/Outdoor (better ventilation)
+            3: 1.0    # Other/Transit
+        }
+        
+        # Household transmission rate (for god mode control)
+        self.household_transmission_rate = 0.80
+        
+        # Behavioral fear response
+        self.fear_active = True
+        self.fear_threshold = 0.01  # 1% death rate triggers fear
+        self.fear_movement_reduction = 0.40  # 40% reduction in movement
+        self.total_deaths = 0
+        
+        # Seasonal/Environmental effects
+        self.seasonal_effects_active = True
+        self.current_season_mult = 1.0  # Will vary by day
+        
+        # Contact intensity by distance
+        self.contact_distance_close = 5.0
+        self.contact_distance_moderate = 10.0
+        self.contact_intensity_close = 1.0
+        self.contact_intensity_moderate = 0.3
+        self.contact_intensity_brief = 0.05
 
     def set_speed_multiplier(self, multiplier: float):
         # Clamp to reasonable range to avoid instability and maintain smoothness
@@ -225,6 +324,41 @@ class NumpySimulationEngine:
             print(f"   All quarantined agents released")
         
         return self.quarantine_active
+    
+    def toggle_masks(self):
+        """Toggle mask wearing on/off"""
+        self.mask_wearing_active = not self.mask_wearing_active
+        
+        if self.mask_wearing_active:
+            compliance_random = np.random.random(self.num_people)
+            self.is_wearing_mask = compliance_random < self.mask_compliance
+            compliant_count = np.sum(self.is_wearing_mask)
+            print(f"😷 MASKS ACTIVE: {compliant_count}/{self.num_people} agents wearing masks ({self.mask_compliance*100:.0f}% compliance)")
+            print(f"   Transmission reduced by {self.mask_effectiveness*100:.0f}%")
+        else:
+            self.is_wearing_mask[:] = False
+            print(f"😷 MASKS DEACTIVATED")
+        
+        return self.mask_wearing_active
+    
+    def get_seasonal_multiplier(self, day):
+        """Calculate seasonal transmission multiplier based on day"""
+        if not self.seasonal_effects_active:
+            return 1.0
+        
+        year_cycle = 365.0
+        day_in_year = day % year_cycle
+        
+        # Winter (days 0-90, 275-365): 1.5x transmission
+        # Summer (days 120-240): 0.7x transmission
+        # Spring/Fall: 1.0x transmission
+        
+        if day_in_year < 90 or day_in_year > 275:
+            return 1.5
+        elif 120 <= day_in_year <= 240:
+            return 0.7
+        else:
+            return 1.0
 
     def set_quarantine_for_people(self, people, active=True, location=None):
         """Quarantine or release a list of people immediately.
@@ -457,10 +591,63 @@ class NumpySimulationEngine:
                 if cell_key in self.spatial_grid:
                     nearby.extend(self.spatial_grid[cell_key])
         return nearby
+    
+    def get_infected_cities_count(self):
+        """Count how many cities have at least one infection (exposed or infectious)"""
+        infected_mask = (self.state == State.EXPOSED.value) | (self.state == State.INFECTIOUS.value)
+        if not np.any(infected_mask):
+            return 0
+        
+        # Get unique city IDs where there are infections
+        infected_city_ids = np.unique(self.city_id[infected_mask])
+        return len(infected_city_ids)
 
     def update(self, time_engine, dt):
+        # 0. Update seasonal effects
+        self.current_season_mult = self.get_seasonal_multiplier(time_engine.current_day)
+        
+        # Auto-vaccination trigger logic
+        if self.auto_vaccination_enabled and not self.auto_vaccination_triggered and not self.vaccination_active:
+            infected_cities = self.get_infected_cities_count()
+            
+            # Trigger if deaths exceed threshold OR infection in 2+ cities
+            if self.total_deaths >= self.auto_vacc_death_threshold or infected_cities >= self.auto_vacc_city_threshold:
+                self.auto_vaccination_triggered = True
+                self.vaccination_active = True
+                self.vaccination_target_rate = 0.20  # Start with LOW 20% target
+                self.vaccination_scope_mask = np.ones(self.num_people, dtype=np.bool_)
+                
+                if self.total_deaths >= self.auto_vacc_death_threshold:
+                    print(f"🚨 AUTO-VACCINATION TRIGGERED: {self.total_deaths} deaths exceeded threshold ({self.auto_vacc_death_threshold})")
+                else:
+                    print(f"🚨 AUTO-VACCINATION TRIGGERED: Infection spread to {infected_cities} cities (threshold: {self.auto_vacc_city_threshold})")
+                print(f"💉 Starting gradual rollout - initial target: 20% (will increase to 50% over time)")
+        
+        # Gradually increase vaccination target over time if auto-triggered
+        if self.auto_vaccination_triggered and self.vaccination_active:
+            # Increase target by 0.1% per tick until reaching 50%
+            if self.vaccination_target_rate < 0.50:
+                self.vaccination_target_rate = min(0.50, self.vaccination_target_rate + 0.001)
+        
+        # Update immunity timers for recovered people (reinfection possibility)
+        recovered_mask = (self.state == State.RECOVERED.value)
+        self.immunity_timer[recovered_mask] += 1
+        
+        # Recovered people lose immunity after duration
+        immunity_lost = recovered_mask & (self.immunity_timer >= self.immunity_duration)
+        if np.any(immunity_lost):
+            self.state[immunity_lost] = State.SUSCEPTIBLE.value
+            self.immunity_timer[immunity_lost] = 0
+            reinfectable_count = int(np.sum(immunity_lost))
+            if reinfectable_count > 0:
+                print(f"⏰ {reinfectable_count} people lost immunity and are now susceptible again")
+        
         # 1. Update Logic (State Transitions)
         # Vectorized state timers
+        
+        # Update viral load for infected people
+        infected_or_exposed = (self.state == State.EXPOSED.value) | (self.state == State.INFECTIOUS.value)
+        self.days_infected[infected_or_exposed] += 1
         
         # Exposed -> Infectious
         exposed_mask = (self.state == State.EXPOSED.value)
@@ -486,9 +673,27 @@ class NumpySimulationEngine:
                 asym_flags = asym_roll < asym_rate
                 v_indices = np.where(vmask)[0]
                 self.is_asymptomatic[v_indices] = asym_flags
+                
+                # Hospitalize symptomatic patients (if capacity available)
+                symptomatic_mask = ~asym_flags
+                symptomatic_indices = v_indices[symptomatic_mask]
+                
+                # Prioritize by age (elderly first, then adults, then children)
+                ages = self.age[symptomatic_indices]
+                hospitalization_priority = np.where(ages >= 65, 3.0,
+                                          np.where(ages >= 18, 2.0, 1.0))
+                sorted_priority_indices = symptomatic_indices[np.argsort(-hospitalization_priority)]
+                
+                # Assign hospital beds based on capacity
+                current_hospitalized = int(np.sum(self.hospitalized))
+                available_beds = max(0, self.hospital_capacity - current_hospitalized)
+                can_hospitalize = min(len(sorted_priority_indices), available_beds)
+                
+                if can_hospitalize > 0:
+                    self.hospitalized[sorted_priority_indices[:can_hospitalize]] = True
+                
+                # Quarantine symptomatic if quarantine active
                 if self.quarantine_active:
-                    symptomatic_mask = ~asym_flags
-                    symptomatic_indices = v_indices[symptomatic_mask]
                     self.in_quarantine[symptomatic_indices] = True
         
         # Infectious -> Recovered/Deceased
@@ -498,17 +703,46 @@ class NumpySimulationEngine:
         
         count_finished = np.count_nonzero(finished_infection)
         if count_finished > 0:
-            # Age-based mortality rates
+            # Age-based and vaccination-based mortality rates
             finished_indices = np.where(finished_infection)[0]
             ages = self.age[finished_indices]
-            
-            # Calculate death probability based on age
-            # Children (0-17): 0.5%, Adults (18-64): 2%, Elderly (65+): 8%
-            death_rates = np.where(ages < 18, 0.005,
-                          np.where(ages < 65, 0.02, 0.08))
-            # Scale by variant-specific mortality factor
+            vaccinated = self.is_vaccinated[finished_indices]
+            asymptomatic = self.is_asymptomatic[finished_indices]
             v_ids = self.variant_id[finished_indices]
+            
+            # UNVACCINATED: High mortality rates (most should die)
+            # Children (0-17): 60%, Adults (18-64): 75%, Elderly (65+): 85%
+            unvaccinated_death_rates = np.where(ages < 18, 0.60,
+                                       np.where(ages < 65, 0.75, 0.85))
+            
+            # VACCINATED: Low mortality rates (most should survive)
+            # Base rates: Children: 5%, Adults: 10%, Elderly: 15%
+            # Modified by vaccine efficacy (higher efficacy = lower death rate)
+            vaccinated_base_rates = np.where(ages < 18, 0.05,
+                                    np.where(ages < 65, 0.10, 0.15))
+            
+            # Apply vaccine efficacy (higher efficacy reduces death rate further)
+            # efficacy of 95% -> death rate * 0.05, efficacy of 60% -> death rate * 0.40
+            efficacy = self.vaccination_efficacy[finished_indices]
+            vaccinated_death_rates = vaccinated_base_rates * (1.0 - efficacy / 100.0)
+            
+            # Choose death rate based on vaccination status
+            death_rates = np.where(vaccinated, vaccinated_death_rates, unvaccinated_death_rates)
+            
+            # Asymptomatic cases have 30% lower mortality
+            death_rates = np.where(asymptomatic, death_rates * 0.70, death_rates)
+            
+            # Hospital capacity penalty: If not hospitalized, mortality increases
+            is_hospitalized = self.hospitalized[finished_indices]
+            death_rates = np.where(~is_hospitalized & ~asymptomatic, 
+                                  death_rates * self.hospital_mortality_multiplier, 
+                                  death_rates)
+            
+            # Scale by variant-specific mortality factor
             death_rates = death_rates * self.variant_mortality[v_ids]
+            
+            # Clamp death rates to [0, 1]
+            death_rates = np.clip(death_rates, 0.0, 1.0)
             
             # Roll for death vs recovery
             outcomes = np.random.random(count_finished)
@@ -518,17 +752,34 @@ class NumpySimulationEngine:
             self.state[finished_indices[deaths]] = State.DECEASED.value
             self.state[finished_indices[recoveries]] = State.RECOVERED.value
             
+            # Track total deaths for fear response
+            self.total_deaths += int(np.sum(deaths))
+            
+            # Reset viral load for finished infections
+            self.days_infected[finished_indices] = 0
+            
+            # Start immunity timer for recovered people
+            self.immunity_timer[finished_indices[recoveries]] = 0
+            
+            # Release hospital beds
+            self.hospitalized[finished_indices] = False
+            
             # Clear asymptomatic flag when infection ends
             self.is_asymptomatic[finished_indices] = False
-            
-            # Release from quarantine when infection ends
-            self.in_quarantine[finished_indices] = False
             
             # Release from quarantine when infection ends
             self.in_quarantine[finished_indices] = False
 
         # 2. Movement Logic
         hour = time_engine.hour
+        
+        # Calculate fear response based on death rate
+        death_rate = self.total_deaths / max(1, self.num_people)
+        fear_mask = np.zeros(self.num_people, dtype=np.bool_)
+        if self.fear_active and death_rate > self.fear_threshold:
+            # Random portion of population stays home due to fear
+            fear_random = np.random.random(self.num_people)
+            fear_mask = fear_random < self.fear_movement_reduction
         
         # Quarantine mode: quarantined agents stay in quarantine location
         if self.quarantine_active:
@@ -546,58 +797,73 @@ class NumpySimulationEngine:
             self.target[lockdown_compliant] = self.home[lockdown_compliant]
             self.flags[lockdown_compliant] |= 1
         
-        # Non-lockdown agents (or non-compliant during lockdown) follow normal schedules
-        # Apply movement only to agents NOT in lockdown compliance
-        active_movement_mask = ~self.lockdown_mask if self.lockdown_active else np.ones(self.num_people, dtype=np.bool_)
+        # Fear response: scared agents stay home
+        if np.any(fear_mask):
+            fear_agents = fear_mask & (self.state != State.DECEASED.value)
+            self.target[fear_agents] = self.home[fear_agents]
+            self.flags[fear_agents] |= 1
+            self.current_location_type[fear_agents] = 0  # Home
         
-        # Set Targets based on time
+        # Non-lockdown agents (or non-compliant during lockdown) follow normal schedules
+        # Apply movement only to agents NOT in lockdown compliance or fear
+        active_movement_mask = ~(self.lockdown_mask | fear_mask) if (self.lockdown_active or np.any(fear_mask)) else np.ones(self.num_people, dtype=np.bool_)
+        
+        # Set Targets based on time and track location types
         # Student Morning (7-8)
         if 7 <= hour < 8:
             student_mask = (self.state != State.DECEASED.value) & self.student & active_movement_mask
             self.target[student_mask] = self.school[student_mask]
             self.flags[student_mask] |= 1
+            self.current_location_type[student_mask] = 1  # School/Work
 
         # Morning Commute (8-9)
         if 8 <= hour < 9:
             active = (self.state != State.DECEASED.value) & self.employed & active_movement_mask
             self.target[active] = self.work[active]
-            self.flags[active] |= 1 # Has Target
+            self.flags[active] |= 1
+            self.current_location_type[active] = 1  # Work
             
         # Lunch Break (12-13) for employed
         if 12 <= hour < 13:
             lunch_mask = (self.state != State.DECEASED.value) & self.employed & active_movement_mask
             self.target[lunch_mask] = self.lunch[lunch_mask]
             self.flags[lunch_mask] |= 1
+            self.current_location_type[lunch_mask] = 2  # Leisure/Outdoor
 
         # Return to Work after Lunch (13-14)
         if 13 <= hour < 14:
             back_to_work = (self.state != State.DECEASED.value) & self.employed & active_movement_mask
             self.target[back_to_work] = self.work[back_to_work]
             self.flags[back_to_work] |= 1
+            self.current_location_type[back_to_work] = 1  # Work
 
         # Student Afternoon (15-16) go home
         if 15 <= hour < 16:
             student_home = (self.state != State.DECEASED.value) & self.student & active_movement_mask
             self.target[student_home] = self.home[student_home]
             self.flags[student_home] |= 1
+            self.current_location_type[student_home] = 0  # Home
 
         # Evening Return (17-18) employed
         if 17 <= hour < 18:
             active = (self.state != State.DECEASED.value) & self.employed & active_movement_mask
             self.target[active] = self.home[active]
             self.flags[active] |= 1
+            self.current_location_type[active] = 0  # Home
 
         # Evening leisure (18-20) for all living agents
         if 18 <= hour < 20:
             leisure_mask = (self.state != State.DECEASED.value) & active_movement_mask
             self.target[leisure_mask] = self.leisure[leisure_mask]
             self.flags[leisure_mask] |= 1
+            self.current_location_type[leisure_mask] = 2  # Leisure
 
         # Return home (20-22) for everyone
         if 20 <= hour < 22:
             back_home = (self.state != State.DECEASED.value) & active_movement_mask
             self.target[back_home] = self.home[back_home]
             self.flags[back_home] |= 1
+            self.current_location_type[back_home] = 0  # Home
             
         # Move towards target
         has_target = (self.flags & 1) == 1
@@ -666,10 +932,17 @@ class NumpySimulationEngine:
             self.pos[np.where(active_mask)[0]] += jitter
 
         # 3. Infection Logic (Spatial Hash)
-        # Only run if there are infectious people
+        # Infectious people + presymptomatic (exposed in late incubation)
         infectious_indices = np.where(self.state == State.INFECTIOUS.value)[0]
-        if len(infectious_indices) > 0:
-            self._process_infections(infectious_indices)
+        
+        # Presymptomatic transmission: Exposed people in last 2-3 days of incubation
+        exposed_indices = np.where((self.state == State.EXPOSED.value) & (self.timer < 100))[0]
+        
+        # Combine both groups (presymptomatic transmit at 40% rate)
+        all_transmitters = np.concatenate([infectious_indices, exposed_indices]) if len(exposed_indices) > 0 else infectious_indices
+        
+        if len(all_transmitters) > 0:
+            self._process_infections(all_transmitters, infectious_indices)
             
         # Sync back to objects for Renderer (Temporary, until Renderer uses Arrays)
         # This is slow, but necessary for the current Renderer
@@ -679,20 +952,55 @@ class NumpySimulationEngine:
         #     p.is_asymptomatic = bool(self.is_asymptomatic[i])
         #     p.variant = self.variant_names[int(self.variant_id[i])]
 
-    def _process_infections(self, infectious_indices):
-        """Graph-based infection with optional spatial spillover (vectorized) + vaccination"""
+    def _process_infections(self, all_transmitters, fully_infectious_indices):
+        """Enhanced infection with all realism features"""
         # Rebuild spatial grid for this frame
         self._update_spatial_grid()
         
-        # Run vaccination campaign if active (gradual spread like infection)
+        # Run vaccination campaign if active
         if self.vaccination_active:
             self.run_vaccination_campaign(target_rate=self.vaccination_target_rate)
         
-        # Batch all potential exposures, then apply at once to avoid redundant checks
-        exposures_to_apply = []  # List of (neighbor_idx, variant_idx) tuples
+        # Batch all potential exposures
+        exposures_to_apply = []
+        
+        # Household transmission (VERY HIGH RATE - 80% within household)
+        # Process households with at least one infectious member
+        for inf_idx in fully_infectious_indices:
+            household = self.household_id[inf_idx]
+            if household == 0:
+                continue
+            
+            # Find all household members
+            household_members = np.where(self.household_id == household)[0]
+            susceptible_members = household_members[self.state[household_members] == State.SUSCEPTIBLE.value]
+            
+            if len(susceptible_members) == 0:
+                continue
+            
+            variant_idx = int(self.variant_id[inf_idx])
+            
+            # Configurable base transmission rate within household
+            household_transmission_prob = self.household_transmission_rate * float(self.variant_transmission[variant_idx])
+            
+            for member_idx in susceptible_members:
+                # Apply individual susceptibility
+                final_prob = household_transmission_prob * self.susceptibility[member_idx]
+                
+                # Vaccination protection
+                if self.is_vaccinated[member_idx]:
+                    final_prob *= (1.0 - self.vaccination_efficacy[member_idx] / 100.0)
+                
+                # Mask protection (both wear masks)
+                if self.mask_wearing_active:
+                    if self.is_wearing_mask[inf_idx] and self.is_wearing_mask[member_idx]:
+                        final_prob *= (1.0 - self.mask_effectiveness)
+                
+                if np.random.random() < final_prob:
+                    exposures_to_apply.append((int(member_idx), variant_idx))
         
         # Primary transmission: Through social network (optimized batch processing)
-        for inf_idx in infectious_indices:
+        for inf_idx in all_transmitters:
             infected_person = self.person_map[inf_idx]
             variant_idx = int(self.variant_id[inf_idx])
             
@@ -718,15 +1026,51 @@ class NumpySimulationEngine:
             if len(susceptible_neighbors) == 0:
                 continue
             
-            # Vectorized transmission probability calculation
+            # Calculate viral load multiplier based on days infected
+            days = self.days_infected[inf_idx]
+            if days < 2:
+                viral_load_mult = 0.3  # Early infection
+            elif days <= 5:
+                viral_load_mult = 1.0  # Peak infectiousness
+            elif days <= 10:
+                viral_load_mult = 0.5  # Declining
+            else:
+                viral_load_mult = 0.2  # Late infection
+            
+            # Presymptomatic transmission (if exposed)
+            if self.state[inf_idx] == State.EXPOSED.value:
+                viral_load_mult *= 0.4  # 40% transmission rate for presymptomatic
+            
+            # Base transmission with all modifiers
             base_transmission_prob = self.infection_prob * 2.0 * float(self.variant_transmission[variant_idx])
+            base_transmission_prob *= viral_load_mult
+            base_transmission_prob *= self.current_season_mult  # Seasonal effect
+            
+            # Superspreader multiplier
+            if self.is_superspreader[inf_idx]:
+                base_transmission_prob *= self.superspreader_mult
+            
+            # Location-based multiplier (use transmitter's location)
+            location_type = int(self.current_location_type[inf_idx])
+            location_mult = self.location_transmission_mults.get(location_type, 1.0)
+            base_transmission_prob *= location_mult
+            
             transmission_probs = np.full(len(susceptible_neighbors), base_transmission_prob, dtype=np.float32)
             
-            # Apply vaccination protection (vectorized)
+            # Individual susceptibility (vectorized)
+            transmission_probs *= self.susceptibility[susceptible_neighbors]
+            
+            # Vaccination protection (vectorized)
             vaccinated_mask = self.is_vaccinated[susceptible_neighbors]
             if np.any(vaccinated_mask):
                 efficacy_reduction = (1.0 - self.vaccination_efficacy[susceptible_neighbors[vaccinated_mask]] / 100.0)
                 transmission_probs[vaccinated_mask] *= efficacy_reduction
+            
+            # Mask effectiveness (if both wearing masks)
+            if self.mask_wearing_active:
+                if self.is_wearing_mask[inf_idx]:
+                    both_masked = self.is_wearing_mask[susceptible_neighbors]
+                    transmission_probs[both_masked] *= (1.0 - self.mask_effectiveness)
             
             # Vectorized random roll for transmission
             infection_rolls = np.random.random(len(susceptible_neighbors))
@@ -742,7 +1086,7 @@ class NumpySimulationEngine:
         spatial_radius_sq = self.infection_radius_sq * 2.0
         
         # Process in batches to reduce overhead
-        for inf_idx in infectious_indices:
+        for inf_idx in all_transmitters:
             inf_pos = self.pos[inf_idx]
             variant_idx = int(self.variant_id[inf_idx])
             
@@ -774,16 +1118,62 @@ class NumpySimulationEngine:
                 continue
             
             nearby_susceptible = susceptible_candidates[within_radius]
+            nearby_distances = np.sqrt(dist_sq[within_radius])
             
-            # Vectorized transmission probability
+            # Calculate viral load multiplier
+            days = self.days_infected[inf_idx]
+            if days < 2:
+                viral_load_mult = 0.3
+            elif days <= 5:
+                viral_load_mult = 1.0
+            elif days <= 10:
+                viral_load_mult = 0.5
+            else:
+                viral_load_mult = 0.2
+            
+            # Presymptomatic
+            if self.state[inf_idx] == State.EXPOSED.value:
+                viral_load_mult *= 0.4
+            
+            # Base probability with modifiers
             base_prob = spatial_spillover_prob * float(self.variant_transmission[variant_idx])
+            base_prob *= viral_load_mult
+            base_prob *= self.current_season_mult
+            
+            # Superspreader
+            if self.is_superspreader[inf_idx]:
+                base_prob *= self.superspreader_mult
+            
+            # Location multiplier
+            location_type = int(self.current_location_type[inf_idx])
+            location_mult = self.location_transmission_mults.get(location_type, 1.0)
+            base_prob *= location_mult
+            
             transmission_probs = np.full(len(nearby_susceptible), base_prob, dtype=np.float32)
             
-            # Apply vaccination protection
+            # Contact intensity based on distance
+            close_mask = nearby_distances < self.contact_distance_close
+            moderate_mask = (nearby_distances >= self.contact_distance_close) & (nearby_distances < self.contact_distance_moderate)
+            brief_mask = nearby_distances >= self.contact_distance_moderate
+            
+            transmission_probs[close_mask] *= self.contact_intensity_close
+            transmission_probs[moderate_mask] *= self.contact_intensity_moderate
+            transmission_probs[brief_mask] *= self.contact_intensity_brief
+            
+            # Individual susceptibility
+            transmission_probs *= self.susceptibility[nearby_susceptible]
+            
+            # Vaccination protection
             vaccinated_mask = self.is_vaccinated[nearby_susceptible]
             if np.any(vaccinated_mask):
                 efficacy_reduction = (1.0 - self.vaccination_efficacy[nearby_susceptible[vaccinated_mask]] / 100.0)
                 transmission_probs[vaccinated_mask] *= efficacy_reduction
+            
+            # Mask effectiveness
+            if self.mask_wearing_active:
+                if self.is_wearing_mask[inf_idx]:
+                    both_masked = self.is_wearing_mask[nearby_susceptible]
+                    transmission_probs[both_masked] *= (1.0 - self.mask_effectiveness)
             
             # Vectorized infection roll
             infection_rolls = np.random.random(len(nearby_susceptible))
