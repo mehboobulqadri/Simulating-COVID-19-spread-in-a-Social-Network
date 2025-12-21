@@ -1,4 +1,0 @@
-numpy
-pygame-ce
-pygame-gui
-networkx
