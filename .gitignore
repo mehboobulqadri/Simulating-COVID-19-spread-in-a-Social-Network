@@ -39,6 +39,7 @@ wheels/
 fps_log.txt
 *.log
 data/exports/
+data/reports/
 *.csv
 *.json
 *.html
