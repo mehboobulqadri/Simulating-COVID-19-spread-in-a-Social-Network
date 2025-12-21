@@ -121,6 +121,10 @@ class BioSpatialApp:
         # God mode panel state (if you want to keep the pygame_gui version)
         self.god_mode_active = False
         
+        # Main window drag state
+        self.main_window_dragging = False
+        self.main_window_drag_start = (0, 0)
+        
         # Set world bounds for minimap in stats panel
         if self.world_bounds:
             min_x, min_y, max_x, max_y = self.world_bounds
@@ -320,8 +324,7 @@ class BioSpatialApp:
             # Update minimap position
             self.minimap.x = new_width - self.minimap.size - 10
             self.minimap.y = new_height - self.minimap.size - 10
-            self.minimap.rect.x = self.minimap.x
-            self.minimap.rect.y = self.minimap.y
+            self.minimap.rect = pygame.Rect(self.minimap.x, self.minimap.y, self.minimap.size, self.minimap.size)
             
             # Update God Mode Button
             self.god_btn_rect.x = new_width - 140
@@ -388,14 +391,23 @@ class BioSpatialApp:
                     self.export_data()
             
             elif event.type == pygame.MOUSEBUTTONDOWN:
+                mouse_pos = pygame.mouse.get_pos()
+                
                 if event.button == 1:
                     # Check God Mode Button
                     if self.god_btn_rect.collidepoint(event.pos):
                         self.toggle_god_mode()
-                        return # Consume click
+                        continue  # Consume click
+                    
+                    # Start dragging if not on UI panels
+                    if not self._is_click_on_panels(mouse_pos):
+                        self.main_window_dragging = True
+                        self.main_window_drag_start = mouse_pos
                 
+                # Handle special mode clicks (these prevent camera drag)
                 if event.button == 1 and self.interaction.box_select_active:
                     self.interaction.start_box(mouse_pos)
+                    continue
                 elif event.button == 1 and self.interaction.quarantine_selection_mode:
                     # Quarantine selection mode - click to toggle district/building quarantine
                     world_pos = self.camera.screen_to_world(*mouse_pos)
@@ -417,7 +429,7 @@ class BioSpatialApp:
                                     self.simulation_engine.set_quarantine_for_people(district.people, active=False)
                                     self.interaction.quarantined_districts.discard(district)
                                     print(f"✅ Released: {district.name}")
-                                break
+                                continue
                             
                             # Check buildings
                             for building in district.buildings:
@@ -449,29 +461,65 @@ class BioSpatialApp:
                                         self.simulation_engine.set_quarantine_for_people(people, active=False)
                                         self.interaction.quarantined_buildings.discard(building)
                                         print(f"✅ Released: {building.type.name} building")
-                                    break
+                                    continue
                 elif event.button == 1 and (pygame.key.get_mods() & pygame.KMOD_SHIFT):
                     world_pos = self.camera.screen_to_world(*mouse_pos)
                     self._infect_at_point(world_pos, self.infect_radius)
-                elif event.button == 1:
-                    # Check if click is on UI panels first
-                    if not self._is_click_on_panels(mouse_pos):
-                        self.interaction.select_entity_at_mouse(self.cities)
-                elif event.button == 3:
+                    continue
+                elif event.button == 1 and self.god_mode_panel.visible and not self._is_click_on_panels(mouse_pos):
+                    world_pos = self.camera.screen_to_world(*mouse_pos)
+                    self._infect_at_point(world_pos, self.infect_radius)
+                    continue
+                
+                # Right click clears selection
+                if event.button == 3:
                     self.interaction.clear_selection()
             
             elif event.type == pygame.MOUSEMOTION:
+                mouse_pos = pygame.mouse.get_pos()
                 self.interaction.update_box(mouse_pos)
+                
+                # Handle main window drag
+                if self.main_window_dragging:
+                    dx = event.pos[0] - self.main_window_drag_start[0]
+                    dy = event.pos[1] - self.main_window_drag_start[1]
+                    
+                    # Pan camera (inverse of mouse movement)
+                    pan_x = dx / self.camera.zoom
+                    pan_y = dy / self.camera.zoom
+                    
+                    self.camera.x -= pan_x
+                    self.camera.y -= pan_y
+                    self.camera.target_x -= pan_x
+                    self.camera.target_y -= pan_y
+                    
+                    self.main_window_drag_start = event.pos
             
             elif event.type == pygame.MOUSEBUTTONUP:
+                mouse_pos = pygame.mouse.get_pos()
+                
+                if event.button == 1:
+                    self.main_window_dragging = False
+                
                 if event.button == 1 and self.interaction.box_select_active:
                     self.interaction.finalize_box_select(self.cities)
+                elif event.button == 1 and not self.camera.did_drag:
+                    # Only select entity if we didn't actually drag
+                    # and not in any special modes
+                    if (not self.interaction.box_select_active and 
+                        not self.interaction.quarantine_selection_mode and
+                        not (pygame.key.get_mods() & pygame.KMOD_SHIFT) and
+                        not self._is_click_on_panels(mouse_pos)):
+                        self.interaction.select_entity_at_mouse(self.cities)
             
             elif event.type == pygame.VIDEORESIZE:
                 if not self.is_fullscreen:
                     self.handle_window_resize(event.w, event.h)
             
-            # Pass events to UI panels (they consume if handled)
+            # Pass events to UI panels first (they consume if handled)
+            if self.minimap.handle_event(event, self.camera):
+                continue
+                
             if self.god_mode_panel.handle_event(event):
                 continue
 
@@ -480,11 +528,8 @@ class BioSpatialApp:
             
             if self.stats_panel.handle_event(event, self.camera):
                 continue
-                
-            if self.minimap.handle_event(event, self.camera):
-                continue
             
-            # Pass event to camera
+            # Pass events to camera for drag/zoom (only if panels didn't consume)
             self.camera.handle_event(event)
         
         # Handle continuous input (keys held down)

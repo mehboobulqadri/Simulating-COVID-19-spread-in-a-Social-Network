@@ -19,6 +19,7 @@ class Camera:
         
         # Drag state
         self.is_dragging = False
+        self.did_drag = False  # Track if mouse actually moved during drag
         self.last_mouse_pos = (0, 0)
 
     def get_projection_matrix(self):
@@ -94,8 +95,9 @@ class Camera:
                     self.target_zoom = self.min_zoom
         
         elif event.type == pygame.MOUSEBUTTONDOWN:
-            if event.button == 1: # Left click
+            if event.button == 1: # Left click for dragging
                 self.is_dragging = True
+                self.did_drag = False  # Reset drag flag
                 self.last_mouse_pos = event.pos
                 
         elif event.type == pygame.MOUSEBUTTONUP:
@@ -106,6 +108,10 @@ class Camera:
             if self.is_dragging:
                 dx = event.pos[0] - self.last_mouse_pos[0]
                 dy = event.pos[1] - self.last_mouse_pos[1]
+                
+                # Mark that we actually dragged
+                if abs(dx) > 2 or abs(dy) > 2:  # Threshold to distinguish click from drag
+                    self.did_drag = True
                 
                 # Adjust camera position immediately (inverse of mouse movement)
                 # Update both current AND target to avoid smooth interpolation fighting the drag
