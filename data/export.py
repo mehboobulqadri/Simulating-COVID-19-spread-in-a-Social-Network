@@ -851,6 +851,46 @@ class DataExporter:
             row_cells = table.add_row().cells
             row_cells[0].text = metric
             row_cells[1].text = value
+        
+        # Age-stratified mortality section
+        doc.add_heading('Age-Stratified Mortality', level=1)
+        age_mort = adv_metrics.get('age_mortality', {})
+        age_demo = adv_metrics.get('age_demographics', {})
+        
+        age_table = doc.add_table(rows=1, cols=4)
+        age_table.style = 'Light Shading Accent 1'
+        age_hdr = age_table.rows[0].cells
+        age_hdr[0].text = 'Age Group'
+        age_hdr[1].text = 'Population'
+        age_hdr[2].text = 'Deaths'
+        age_hdr[3].text = 'Mortality Rate'
+        
+        age_groups = [
+            ('Children (0-17)', 'children', 0.5),
+            ('Adults (18-64)', 'adults', 2.0),
+            ('Elderly (65+)', 'elderly', 8.0)
+        ]
+        
+        for label, key, expected_rate in age_groups:
+            row = age_table.add_row().cells
+            pop = age_demo.get(key, 0)
+            deaths = age_mort.get(key, 0)
+            actual_rate = (deaths / pop * 100) if pop > 0 else 0
+            row[0].text = label
+            row[1].text = f"{pop:,}"
+            row[2].text = f"{deaths:,}"
+            row[3].text = f"{actual_rate:.2f}%"
+        
+        doc.add_paragraph()
+        doc.add_paragraph("Note: Mortality rates vary by age group, with elderly populations experiencing higher fatality rates.")
+        
+        # Continue with original metrics table (remove duplicate code)
+        metrics = []
+        
+        for metric, value in metrics:
+            row_cells = table.add_row().cells
+            row_cells[0].text = metric
+            row_cells[1].text = value
             
         # Charts
         doc.add_heading('Epidemic Progression', level=1)
@@ -965,6 +1005,7 @@ class DataExporter:
         import os
         md_path = os.path.join(output_dir, f"{base_name}.md")
         final_counts = stats_manager.get_latest_counts()
+        adv_metrics = stats_manager.get_advanced_metrics()
         
         with open(md_path, 'w') as f:
             f.write(f"# COVID-19 Simulation Report\n\n")
@@ -974,6 +1015,28 @@ class DataExporter:
             f.write(f"- **Total Deaths**: {final_counts[State.DECEASED]:,}\n")
             f.write(f"- **Active Cases**: {final_counts[State.INFECTIOUS]:,}\n")
             f.write(f"- **Recovered**: {final_counts[State.RECOVERED]:,}\n\n")
+            
+            # Age-stratified mortality
+            f.write("## Age-Stratified Mortality\n\n")
+            age_mort = adv_metrics.get('age_mortality', {})
+            age_demo = adv_metrics.get('age_demographics', {})
+            
+            f.write("| Age Group | Population | Deaths | Mortality Rate |\n")
+            f.write("|-----------|------------|--------|----------------|\n")
+            
+            age_groups = [
+                ('Children (0-17)', 'children'),
+                ('Adults (18-64)', 'adults'),
+                ('Elderly (65+)', 'elderly')
+            ]
+            
+            for label, key in age_groups:
+                pop = age_demo.get(key, 0)
+                deaths = age_mort.get(key, 0)
+                rate = (deaths / pop * 100) if pop > 0 else 0
+                f.write(f"| {label} | {pop:,} | {deaths:,} | {rate:.2f}% |\n")
+            
+            f.write("\n*Note: Mortality rates vary significantly by age group.*\n\n")
             
             f.write("## Visualizations\n\n")
             if 'seir' in chart_paths:
@@ -999,11 +1062,13 @@ class DataExporter:
         import os
         tex_path = os.path.join(output_dir, f"{base_name}.tex")
         final_counts = stats_manager.get_latest_counts()
+        adv_metrics = stats_manager.get_advanced_metrics()
         
         with open(tex_path, 'w') as f:
             f.write(r"""\documentclass{article}
 \usepackage{graphicx}
 \usepackage{hyperref}
+\usepackage{booktabs}
 \title{COVID-19 Simulation Report}
 \author{Antigravity Simulator}
 \date{\today}
@@ -1012,7 +1077,36 @@ class DataExporter:
 \section{Summary}
 """)
             f.write(f"Total Deaths: {final_counts[State.DECEASED]} \\\\\n")
-            f.write(f"Active Cases: {final_counts[State.INFECTIOUS]} \\\\\n")
+            f.write(f"Active Cases: {final_counts[State.INFECTIOUS]} \\\\\n\n")
+            
+            # Age-stratified mortality table
+            f.write(r"\section{Age-Stratified Mortality}" + "\n")
+            f.write(r"\begin{table}[h]" + "\n")
+            f.write(r"\centering" + "\n")
+            f.write(r"\begin{tabular}{lrrr}" + "\n")
+            f.write(r"\toprule" + "\n")
+            f.write(r"Age Group & Population & Deaths & Mortality Rate \\" + "\n")
+            f.write(r"\midrule" + "\n")
+            
+            age_mort = adv_metrics.get('age_mortality', {})
+            age_demo = adv_metrics.get('age_demographics', {})
+            
+            age_groups = [
+                ('Children (0--17)', 'children'),
+                ('Adults (18--64)', 'adults'),
+                ('Elderly (65+)', 'elderly')
+            ]
+            
+            for label, key in age_groups:
+                pop = age_demo.get(key, 0)
+                deaths = age_mort.get(key, 0)
+                rate = (deaths / pop * 100) if pop > 0 else 0
+                f.write(f"{label} & {pop:,} & {deaths:,} & {rate:.2f}\\% \\\\\n")
+            
+            f.write(r"\bottomrule" + "\n")
+            f.write(r"\end{tabular}" + "\n")
+            f.write(r"\caption{Deaths by age group showing differential mortality rates.}" + "\n")
+            f.write(r"\end{table}" + "\n\n")
             
             f.write(r"\section{Visualizations}" + "\n")
             

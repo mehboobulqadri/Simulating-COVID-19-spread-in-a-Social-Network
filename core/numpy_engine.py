@@ -111,12 +111,12 @@ class NumpySimulationEngine:
         print(f"  Adults (18-64): {adults} ({adults/self.num_people*100:.1f}%) - Mortality: 2.0%")
         print(f"  Elderly (65+): {elderly} ({elderly/self.num_people*100:.1f}%) - Mortality: 8.0%")
                     
-        # Constants
+        # Constants - reduced for more realistic spread
         self.infection_radius = 10.0
-        self.infection_prob = 0.05
+        self.infection_prob = 0.015  # Reduced from 0.05 for slower spread
         self.recovery_rate = 0.02  # Base death rate (will be modified by age)
         # Factor to scale spatial spillover probability relative to base infection_prob
-        self.spatial_spillover_factor = 0.3
+        self.spatial_spillover_factor = 0.2  # Reduced from 0.3
         self.infection_radius_sq = self.infection_radius ** 2
         self.asymptomatic_rate = 0.40  # Default asymptomatic rate (used by base variant)
 
@@ -126,8 +126,8 @@ class NumpySimulationEngine:
                 "name": "base",
                 "transmission_mult": 1.0,
                 "mortality_mult": 1.0,
-                "incubation_range": (100, 300),
-                "infectious_range": (500, 1000),
+                "incubation_range": (200, 400),  # Longer incubation
+                "infectious_range": (600, 1200),  # Longer infectious period
                 "asymptomatic_rate": 0.40,
                 "color": (255, 140, 80),
             },
@@ -225,6 +225,36 @@ class NumpySimulationEngine:
             print(f"   All quarantined agents released")
         
         return self.quarantine_active
+
+    def set_quarantine_for_people(self, people, active=True, location=None):
+        """Quarantine or release a list of people immediately.
+
+        This is used by district/building click selection so quarantine takes
+        effect right away instead of waiting for new infections.
+        """
+        if not people:
+            return 0
+
+        mask = self._build_scope_mask(people)
+        count = int(np.count_nonzero(mask))
+        if count == 0:
+            return 0
+
+        if active:
+            self.in_quarantine[mask] = True
+            # Default quarantine location is home unless a target location is provided
+            if location is not None:
+                self.quarantine_location[mask] = location
+            else:
+                self.quarantine_location[mask] = self.home[mask]
+            self.quarantine_active = True
+        else:
+            self.in_quarantine[mask] = False
+            # If nobody remains quarantined, turn the global flag off so movement resumes
+            if not np.any(self.in_quarantine):
+                self.quarantine_active = False
+
+        return count
 
     def set_active_variant(self, name_or_index):
         """Set the currently active variant used for new infections."""
@@ -503,8 +533,11 @@ class NumpySimulationEngine:
         # Quarantine mode: quarantined agents stay in quarantine location
         if self.quarantine_active:
             quarantined = self.in_quarantine & (self.state != State.DECEASED.value)
+            # Hard-stop movement: zero speed and force target to quarantine location
             self.target[quarantined] = self.quarantine_location[quarantined]
             self.flags[quarantined] |= 1
+            # Override speeds to 0 while quarantined so they cannot drift
+            self.speed[quarantined] = 0.0
         
         # In lockdown mode, compliant agents stay home and don't follow schedules
         if self.lockdown_active:

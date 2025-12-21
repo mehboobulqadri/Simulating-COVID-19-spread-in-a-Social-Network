@@ -21,6 +21,18 @@ class StatisticsManager:
         self.vaccination_rates = []  # % vaccinated
         self.infection_counts = []  # Total infections per day
         
+        # Age-stratified mortality tracking
+        self.age_mortality = {
+            'children': 0,    # Deaths aged 0-17
+            'adults': 0,      # Deaths aged 18-64
+            'elderly': 0      # Deaths aged 65+
+        }
+        self.age_demographics = {
+            'children': 0,
+            'adults': 0,
+            'elderly': 0
+        }
+        
     def update(self, cities, current_time, engine=None):
         # Aggregate counts
         counts = {s: 0 for s in State}
@@ -36,6 +48,16 @@ class StatisticsManager:
                 counts[s] = count_dict.get(s.value, 0)
                 
             vaccinated_count = np.count_nonzero(engine.is_vaccinated)
+            
+            # Track age demographics and mortality
+            deceased_mask = engine.state == State.DECEASED.value
+            self.age_mortality['children'] = int(np.sum(deceased_mask & (engine.age < 18)))
+            self.age_mortality['adults'] = int(np.sum(deceased_mask & (engine.age >= 18) & (engine.age < 65)))
+            self.age_mortality['elderly'] = int(np.sum(deceased_mask & (engine.age >= 65)))
+            
+            self.age_demographics['children'] = int(np.sum(engine.age < 18))
+            self.age_demographics['adults'] = int(np.sum((engine.age >= 18) & (engine.age < 65)))
+            self.age_demographics['elderly'] = int(np.sum(engine.age >= 65))
             
         else:
             # Fallback to object iteration
@@ -147,5 +169,7 @@ class StatisticsManager:
             'doubling_time': self.doubling_times[-1] if self.doubling_times else float('inf'),
             'daily_deaths': self.mortality_rates[-1] if self.mortality_rates else 0,
             'vaccination_rate': self.vaccination_rates[-1] if self.vaccination_rates else 0.0,
-            'total_infections': self.infection_counts[-1] if self.infection_counts else 0
+            'total_infections': self.infection_counts[-1] if self.infection_counts else 0,
+            'age_mortality': self.age_mortality.copy(),
+            'age_demographics': self.age_demographics.copy()
         }

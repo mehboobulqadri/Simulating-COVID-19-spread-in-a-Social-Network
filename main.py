@@ -19,6 +19,7 @@ from ui.control_panel import ControlPanel  # NEW: Professional left panel
 from ui.right_stats_panel import RightStatsPanel  # NEW: Professional right panel
 from ui.god_mode import GodModePanel
 from ui.minimap import Minimap
+from ui.theme import UITheme
 from core.time_engine import TimeEngine
 from core.numpy_engine import NumpySimulationEngine
 from core.statistics import StatisticsManager
@@ -26,6 +27,7 @@ from data.world_generator import WorldGenerator
 from data.persistence import PersistenceManager
 from data.export import DataExporter
 from entities.person import State
+from datetime import datetime
 import random
 import math
 
@@ -39,6 +41,15 @@ class BioSpatialApp:
             pass
 
         pygame.init()
+        # Request an OpenGL 3.3 core profile context before creating the window.
+        # Without this on macOS, ModernGL fails to create a usable context and the screen stays black.
+        try:
+            pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
+            pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 3)
+            pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE)
+            pygame.display.gl_set_attribute(pygame.GL_DOUBLEBUFFER, 1)
+        except Exception:
+            pass
         
         # Get screen dimensions
         info = pygame.display.Info()
@@ -127,6 +138,10 @@ class BioSpatialApp:
         
         # Pass data to renderer
         self.renderer.set_world_data(self.cities)
+
+        # HUD cache
+        self._hud_cache = None
+        self._hud_cache_tick = -1
 
     def _compute_world_bounds(self, cities):
         xs, ys = [], []
@@ -390,9 +405,16 @@ class BioSpatialApp:
                                 # Toggle quarantine for district
                                 district.is_quarantined = not district.is_quarantined
                                 if district.is_quarantined:
+                                    # Quarantine everyone in the district immediately
+                                    self.simulation_engine.set_quarantine_for_people(
+                                        district.people,
+                                        active=True,
+                                        location=(district.bounds.centerx, district.bounds.centery)
+                                    )
                                     self.interaction.quarantined_districts.add(district)
                                     print(f"🏥 Quarantined: {district.name}")
                                 else:
+                                    self.simulation_engine.set_quarantine_for_people(district.people, active=False)
                                     self.interaction.quarantined_districts.discard(district)
                                     print(f"✅ Released: {district.name}")
                                 break
@@ -402,9 +424,29 @@ class BioSpatialApp:
                                 if building.bounds.collidepoint(world_pos):
                                     building.is_quarantined = not building.is_quarantined
                                     if building.is_quarantined:
+                                        # Quarantine only people that belong to this building (home/work/school match)
+                                        # People store home/work/school locations; filter by bounding box membership.
+                                        people = [
+                                            p for p in district.people
+                                            if building.bounds.collidepoint(*p.home_location)
+                                            or building.bounds.collidepoint(*getattr(p, 'work_location', p.home_location))
+                                            or building.bounds.collidepoint(*getattr(p, 'school_location', p.home_location))
+                                        ]
+                                        self.simulation_engine.set_quarantine_for_people(
+                                            people,
+                                            active=True,
+                                            location=(building.bounds.centerx, building.bounds.centery)
+                                        )
                                         self.interaction.quarantined_buildings.add(building)
                                         print(f"🏥 Quarantined: {building.type.name} building")
                                     else:
+                                        people = [
+                                            p for p in district.people
+                                            if building.bounds.collidepoint(*p.home_location)
+                                            or building.bounds.collidepoint(*getattr(p, 'work_location', p.home_location))
+                                            or building.bounds.collidepoint(*getattr(p, 'school_location', p.home_location))
+                                        ]
+                                        self.simulation_engine.set_quarantine_for_people(people, active=False)
                                         self.interaction.quarantined_buildings.discard(building)
                                         print(f"✅ Released: {building.type.name} building")
                                     break
@@ -640,12 +682,23 @@ class BioSpatialApp:
         trace_points = self.interaction.trace_points if (self.interaction.tracing_enabled and self.interaction.trace_points) else None
         
         # Render Minimap to ui_surface
-        self.minimap.render(self.ui_surface, self.cities, self.camera, trace_points)
+        self.minimap.render(self.ui_surface, self.cities, self.camera, trace_points, self.simulation_engine)
 
         self.stats_panel.render(self.ui_surface, self.stats_manager, self.cities, self.camera, trace_points)
         
+        # Quarantine highlights in world space
+        self._render_quarantine_highlights(self.ui_surface)
+
+        # Always-visible overlays (legend)
+        self._render_state_legend(self.ui_surface)
+
         # Render God Mode Panel to ui_surface
         self.god_mode_panel.render(self.ui_surface)
+
+        # Hover info card (entities/buildings/districts/roads)
+        hover_info = self.interaction.get_hover_info()
+        if hover_info:
+            self._render_hover_info(self.ui_surface, hover_info, pygame.mouse.get_pos())
         
         # Draw box select rectangle to ui_surface if active
         if self.interaction.box_select_active and self.interaction.box_start and self.interaction.box_end:
@@ -668,6 +721,173 @@ class BioSpatialApp:
         if not hasattr(self, '_render_times'):
             self._render_times = []
         self._render_times.append((render_time, overlay_time, flip_time))
+
+    def _render_state_legend(self, surface):
+        legend = [
+            ((100, 200, 255), "Susceptible"),
+            ((255, 255, 100), "Exposed"),
+            ((255, 50, 50), "Infectious"),
+            ((50, 200, 50), "Recovered"),
+            ((150, 150, 150), "Deceased"),
+            ((200, 100, 255), "Vaccinated"),
+        ]
+        padding = 10
+        x = 12
+        font = UITheme.get_font(12)
+        line_h = 18
+        width = max(font.size(text)[0] for _, text in legend) + 34
+        height = line_h * len(legend) + padding * 2
+        y = self.height - height - 12  # Position at bottom-left
+        rect = pygame.Rect(x, y, width, height)
+
+        bg = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+        bg.fill((18, 22, 30, 220))
+        surface.blit(bg, rect.topleft)
+        pygame.draw.rect(surface, UITheme.BORDER_COLOR, rect, 1, border_radius=8)
+
+        cy = rect.y + padding
+        for color, label in legend:
+            pygame.draw.rect(surface, color, (rect.x + 8, cy + 2, 12, 12), border_radius=2)
+            text_surf = font.render(label, True, UITheme.TEXT_COLOR)
+            surface.blit(text_surf, (rect.x + 26, cy - 1))
+            cy += line_h
+
+    def _render_quarantine_highlights(self, surface):
+        # Fill and stroke colors for quarantined selections
+        fill_q = (120, 200, 255, 60)
+        stroke_q = (120, 200, 255)
+        fill_hover = (255, 210, 100, 40)
+        stroke_hover = (255, 200, 80)
+
+        def rect_to_poly(rect):
+            tl = self.camera.apply(rect.left, rect.top)
+            tr = self.camera.apply(rect.right, rect.top)
+            br = self.camera.apply(rect.right, rect.bottom)
+            bl = self.camera.apply(rect.left, rect.bottom)
+            return [tl, tr, br, bl]
+
+        # Draw quarantined areas
+        for district in getattr(self.interaction, 'quarantined_districts', []):
+            poly = rect_to_poly(district.bounds)
+            pygame.draw.polygon(surface, fill_q, poly)
+            pygame.draw.polygon(surface, stroke_q, poly, width=2)
+
+        for building in getattr(self.interaction, 'quarantined_buildings', []):
+            poly = rect_to_poly(building.bounds)
+            pygame.draw.polygon(surface, fill_q, poly)
+            pygame.draw.polygon(surface, stroke_q, poly, width=2)
+
+        # Highlight hovered target while in selection mode
+        if self.interaction.quarantine_selection_mode and self.interaction.hovered_entity:
+            ent = self.interaction.hovered_entity
+            if hasattr(ent, 'bounds'):
+                poly = rect_to_poly(ent.bounds)
+                pygame.draw.polygon(surface, fill_hover, poly)
+                pygame.draw.polygon(surface, stroke_hover, poly, width=2)
+
+    def _render_hud_summary(self, surface):
+        # Update cached values every 20 ticks to keep overhead low
+        if self.time_engine.ticks != self._hud_cache_tick and self.time_engine.ticks % 20 == 0:
+            latest = self.stats_manager.get_latest_counts()
+            total_agents = 0
+            total_commuters = 0
+            for city in self.cities:
+                for district in city.districts:
+                    for p in district.people:
+                        total_agents += 1
+                        home_id = getattr(p, 'home_city_id', None)
+                        work_id = getattr(p, 'work_city_id', None)
+                        if home_id is not None and work_id is not None and work_id != home_id:
+                            total_commuters += 1
+            metrics = self.stats_manager.get_advanced_metrics()
+            self._hud_cache = {
+                'latest': latest,
+                'total_agents': total_agents,
+                'commuters': total_commuters,
+                'r_value': metrics.get('r_value', 0.0),
+                'doubling': metrics.get('doubling_time', float('inf')),
+            }
+            self._hud_cache_tick = self.time_engine.ticks
+
+        if not self._hud_cache:
+            return
+
+        hud = self._hud_cache
+        x = self.width - 260
+        y = 60  # Leave room for God Mode button
+        w = 248
+        h = 140
+        rect = pygame.Rect(x, y, w, h)
+
+        bg = pygame.Surface((w, h), pygame.SRCALPHA)
+        bg.fill((20, 24, 32, 220))
+        surface.blit(bg, (x, y))
+        pygame.draw.rect(surface, UITheme.BORDER_COLOR, rect, 1, border_radius=10)
+
+        font_title = UITheme.get_font(14, bold=True)
+        font_val = UITheme.get_font(14)
+        surface.blit(font_title.render("OVERVIEW", True, UITheme.ACCENT_COLOR), (x + 12, y + 10))
+
+        lines = [
+            ("Total Agents", hud['total_agents']),
+            ("Commuters", hud['commuters']),
+            ("Exposed", hud['latest'].get(State.EXPOSED, 0)),
+            ("Infectious", hud['latest'].get(State.INFECTIOUS, 0)),
+            ("R", f"{hud['r_value']:.2f}"),
+        ]
+
+        cy = y + 34
+        for label, val in lines:
+            text = f"{label}: {val}"
+            surface.blit(font_val.render(text, True, UITheme.TEXT_COLOR), (x + 12, cy))
+            cy += 22
+
+    def _render_hover_info(self, surface, lines, mouse_pos):
+        """Draw a small hover info card near the cursor."""
+        if not lines:
+            return
+        # Layout
+        font_title = UITheme.get_font(14, bold=True)
+        font_body = UITheme.get_font(12)
+        max_width = 0
+        line_surfs = []
+        for i, txt in enumerate(lines):
+            font = font_title if i == 0 else font_body
+            surf = font.render(str(txt), True, UITheme.TEXT_COLOR)
+            line_surfs.append(surf)
+            max_width = max(max_width, surf.get_width())
+        padding = 12
+        line_height = max(s.get_height() for s in line_surfs)
+        card_width = max_width + padding * 2
+        card_height = line_height * len(line_surfs) + padding * 2
+
+        # Position near cursor with clamp to screen
+        mx, my = mouse_pos
+        x = mx + 18
+        y = my + 18
+        screen_w, screen_h = surface.get_size()
+        if x + card_width > screen_w:
+            x = max(10, mx - card_width - 18)
+        if y + card_height > screen_h:
+            y = max(10, my - card_height - 18)
+
+        rect = pygame.Rect(x, y, card_width, card_height)
+
+        # Background with slight gradient and border
+        bg = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+        bg.fill((18, 22, 30, 230))
+        surface.blit(bg, rect.topleft)
+        pygame.draw.rect(surface, UITheme.BORDER_COLOR, rect, 1, border_radius=8)
+
+        # Accent stripe
+        stripe_rect = pygame.Rect(rect.x, rect.y, 4, rect.height)
+        pygame.draw.rect(surface, UITheme.ACCENT_COLOR, stripe_rect, border_radius=3)
+
+        # Text
+        cy = rect.y + padding
+        for i, surf in enumerate(line_surfs):
+            surface.blit(surf, (rect.x + padding + 6, cy))
+            cy += surf.get_height()
 
     def run(self):
         import time
