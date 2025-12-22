@@ -1,7 +1,0 @@
-numpy
-pygame-ce
-pygame-gui
-networkx
-networkx
-python-docx
-matplotlib
