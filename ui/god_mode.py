@@ -117,19 +117,30 @@ class GodModePanel:
             # Check if click is inside panel
             if self.rect.collidepoint(event.pos):
                 mx, my = event.pos
-                button_start_y = self.y + 60
+                
+                # Calculate positions exactly like in render()
+                current_y = self.y + 60 - self.scroll_offset
                 
                 # Check buttons first
+                current_y += 30  # Skip ACTIONS header
                 for i, button in enumerate(self.buttons):
-                    btn_rect = pygame.Rect(self.x + 20, button_start_y + i * 35 - self.scroll_offset, 200, 30)
+                    btn_rect = pygame.Rect(self.x + 20, current_y, 200, 30)
                     if btn_rect.collidepoint(mx, my) and btn_rect.bottom < self.rect.bottom:
                         self._perform_action(button['action'])
                         return True
+                    current_y += 35
+                
+                current_y += 10
                 
                 # Then check sliders
-                slider_start_y = button_start_y + len(self.buttons) * 35 + 40
+                current_category = None
                 for i, slider in enumerate(self.sliders):
-                    slider_y = slider_start_y + i * 55 - self.scroll_offset
+                    # Category header
+                    if slider.get('category') != current_category:
+                        current_category = slider['category']
+                        current_y += 30
+                    
+                    slider_y = current_y
                     bar_rect = pygame.Rect(self.x + 20, slider_y + 25, self.width - 40, 10)
                     
                     # Click anywhere on bar to set value + start dragging
@@ -137,6 +148,8 @@ class GodModePanel:
                         self.dragging_slider = i
                         self._update_slider_value(i, mx, bar_rect)
                         return True
+                    
+                    current_y += 55
                 
                 return True  # Consume click inside panel
             else:
@@ -150,30 +163,56 @@ class GodModePanel:
             mx, my = event.pos
             
             if self.rect.collidepoint(mx, my):
+                # Calculate positions exactly like in render()
+                current_y = self.y + 60 - self.scroll_offset
+                
                 # Check button hovers
-                button_start_y = self.y + 60
+                current_y += 30  # Skip ACTIONS header
                 for i, button in enumerate(self.buttons):
-                    btn_rect = pygame.Rect(self.x + 20, button_start_y + i * 35 - self.scroll_offset, 200, 30)
+                    btn_rect = pygame.Rect(self.x + 20, current_y, 200, 30)
                     if btn_rect.collidepoint(mx, my) and btn_rect.bottom < self.rect.bottom:
                         self.hovered_button = i
                         break
+                    current_y += 35
+                
+                current_y += 10
                 
                 # Check slider hovers
-                slider_start_y = self.y + 60 + len(self.buttons) * 35 + 40
+                current_category = None
                 for i, slider in enumerate(self.sliders):
-                    slider_y = slider_start_y + i * 55 - self.scroll_offset
+                    # Category header
+                    if slider.get('category') != current_category:
+                        current_category = slider['category']
+                        current_y += 30
+                    
+                    slider_y = current_y
                     bar_rect = pygame.Rect(self.x + 20, slider_y + 25, self.width - 40, 10)
                     if bar_rect.inflate(0, 20).collidepoint(mx, my) and bar_rect.bottom < self.rect.bottom:
                         self.hovered_slider = i
                         break
+                    
+                    current_y += 55
             
             # Update slider while dragging
             if self.dragging_slider is not None:
-                slider_start_y = self.y + 60 + len(self.buttons) * 35 + 40
-                slider_y = slider_start_y + self.dragging_slider * 55 - self.scroll_offset
-                bar_rect = pygame.Rect(self.x + 20, slider_y + 25, self.width - 40, 10)
-                self._update_slider_value(self.dragging_slider, event.pos[0], bar_rect)
-                return True
+                slider_start_y = self.y + 60 - self.scroll_offset
+                current_y = slider_start_y + 30  # Skip ACTIONS header
+                current_y += len(self.buttons) * 35 + 10
+                
+                # Find the dragging slider's position
+                current_category = None
+                for i, slider in enumerate(self.sliders):
+                    if slider.get('category') != current_category:
+                        current_category = slider['category']
+                        current_y += 30
+                    
+                    if i == self.dragging_slider:
+                        slider_y = current_y
+                        bar_rect = pygame.Rect(self.x + 20, slider_y + 25, self.width - 40, 10)
+                        self._update_slider_value(self.dragging_slider, event.pos[0], bar_rect)
+                        return True
+                    
+                    current_y += 55
                 
         if event.type == pygame.MOUSEBUTTONUP:
             self.dragging_slider = None

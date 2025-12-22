@@ -8,7 +8,7 @@ if sys.platform == 'win32':
         import codecs
         sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
         sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
-    except:
+    except Exception:
         pass
 
 from graphics.gl_renderer import GLRenderer
@@ -37,7 +37,8 @@ class BioSpatialApp:
         try:
             import ctypes
             ctypes.windll.user32.SetProcessDPIAware()
-        except:
+        except AttributeError:
+            # Not on Windows or ctypes not available
             pass
 
         pygame.init()
